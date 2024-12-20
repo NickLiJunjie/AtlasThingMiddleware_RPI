@@ -10,7 +10,7 @@ AR  := usResourceCompiler4
 AG  := autogen
 
 # same flags as described in `cppus-test'
-CXXFLAGS := -std=c++14 -Wall -fPIC -lwiringPi -lm -lrt -lcrypt -lpigpio -lgpiod
+CXXFLAGS := -std=c++14 -Wall -fPIC -lwiringPi -lm -lrt -lcrypt -lpigpio
 DIRFLAGS := -I$(US.dir)/include/cppmicroservices/ -I..
 LDFLAGS  := -Wl,-rpath,.
 LIBFLAGS := -lCppMicroServicesd

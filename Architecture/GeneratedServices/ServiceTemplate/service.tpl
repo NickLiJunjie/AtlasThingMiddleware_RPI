@@ -8,9 +8,7 @@
 #include <cppmicroservices/BundleActivator.h>
 extern "C" {
 [+ IF (exist? "library") +]
-[+ FOR library +]
-#include "[+ (get "name") +]"
-[+ ENDFOR +]
+[+ (get "library") +]
 [+ ENDIF +]
 }
 

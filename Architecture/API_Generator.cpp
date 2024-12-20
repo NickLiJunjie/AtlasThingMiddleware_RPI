@@ -109,10 +109,10 @@ void API_Generator::Generate_ServicesBundles(){
 	for(int j=1;j<=num_Entities;j++){
 
 		int num_services = 1; 
-		string num_of_services = DDLM.parseXMLTag("Atlas_IoTDDL","Atlas_Entities","Entity_"+std::to_string(j),"Services","Number_Services");
-		num_services =  atoi(num_of_services.c_str());
+	    	string num_of_services = DDLM.parseXMLTag("Atlas_IoTDDL","Atlas_Entities","Entity_"+std::to_string(j),"Services","Number_Services");
+	    	num_services =  atoi(num_of_services.c_str());
 	    
-		for(int i=1;i<=num_services;i++){
+	    	for(int i=1;i<=num_services;i++){
 
 			int Service_Number = i;
 			cout<<"Parsing Information of Service #"<<i<<" under entity #"<<j<<endl;
@@ -164,6 +164,15 @@ void API_Generator::Generate_ServicesBundles(){
 			//set the library of the RaspberryPI GPIO
 			//def << "library = " << "#include <wiringPi.h>" << ";" << std::endl;           // Add the service name
 
+			// Handle Libraries
+			if(Service_Libraries.compare("NULL") != 0){
+				istringstream libs(Service_Libraries);
+				string lib;
+				while(getline(libs, lib, ',')) {
+					def << "library = \"" << "#include <" << lib << ">" << "\";" << std::endl;
+				}
+			}
+			
 			def << "name = " << Service_Name << ";" << std::endl;           // Add the service name
 
 
@@ -410,15 +419,7 @@ void API_Generator::Generate_ServicesBundles(){
 
 			}
 
-			// Handle Libraries
-			if(Service_Libraries.compare("NULL") != 0){
-				istringstream libs(Service_Libraries);
-				string lib;
-				while(getline(libs, lib, ',')) {
-					// def << "library = " << "#include <" << lib << ">" << ";" << std::endl;
-					def << "library = { name = \"" << lib << "\"; };" << std::endl;
-				}
-			}
+			
 
 			if(Service_OutputTypes == "void") {
 				def << "output = { type = void; };" << std::endl;
@@ -428,6 +429,19 @@ void API_Generator::Generate_ServicesBundles(){
 				def << "output = { name = "<<Service_OutputDescription<<"; type = \""<<Service_OutputTypes<<"\"; };" << std::endl;
 			}
 			def.close();
+
+	    	// // 在这里添加复制逻辑
+	    	// std::string targetPath = "/home/lijunjie/Desktop/service.def"; // 替换成你想要的目标路径
+	    	// std::ifstream src(dir + "service.def", std::ios::binary);
+	    	// std::ofstream dst(targetPath, std::ios::binary);
+
+	    	if (src && dst) {
+	    		dst << src.rdbuf();
+	    		src.close();
+	    		dst.close();
+	    	} else {
+	    		std::cerr << "Failed to copy service.def to target path" << std::endl;
+	    	}
 
 			// This system call instructs the Makefile under '.../Architecture/GeneratedServices/service/Makefile'
 			// to generate the directory of the service

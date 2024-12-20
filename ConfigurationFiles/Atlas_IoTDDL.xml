@@ -1,17 +1,17 @@
 <Atlas_IoTDDL>
 	<Atlas_Thing>
 		<Descriptive_Metadata>
-			<Thing_ATID>MySmartThing01</Thing_ATID>
-			<Thing_Name></Thing_Name>
-			<Thing_Owner></Thing_Owner>
-			<Thing_Vendor></Thing_Vendor>
-			<Thing_Model></Thing_Model>
-			<Thing_ReleaseDate>8/2020</Thing_ReleaseDate>
-			<Thing_Type></Thing_Type>
-			<Thing_OperatingSystem></Thing_OperatingSystem>
+			<Thing_ATID>RPi-LJJ</Thing_ATID>
+			<Thing_Name>RPi-LJJ</Thing_Name>
+			<Thing_Owner>Junjie Li</Thing_Owner>
+			<Thing_Vendor>RaspberryPiCo</Thing_Vendor>
+			<Thing_Model>4B</Thing_Model>
+			<Thing_ReleaseDate>6/2019</Thing_ReleaseDate>
+			<Thing_Type>Thing of Things</Thing_Type>
+			<Thing_OperatingSystem>Raspbian</Thing_OperatingSystem>
 			<Thing_ShortDescription></Thing_ShortDescription>
 			<LongDescription></LongDescription>
-			<Thing_SSID>MySmartSpace</Thing_SSID>
+			<Thing_SSID>DiveNet</Thing_SSID>
 			<Space_Coordinates></Space_Coordinates>
 			<Space_Name></Space_Name>
 			<Space_Description></Space_Description>
@@ -34,15 +34,15 @@
 		</Descriptive_Metadata>
 		<Administrative_Metadata>
 			<Network_Manager>
-				<Module></Module>
-				<Type></Type>
-				<Network_Name>MySpaceNetwork</Network_Name>
-				<Network_Passcode>MySpaceNetwork</Network_Passcode>
+				<Module>WiFi</Module>
+				<Type>Attached</Type>
+				<Network_Name>0x150</Network_Name>
+				<Network_Passcode>336336336</Network_Passcode>
 				<MulticastGroup>
 					<IP>232.1.1.1</IP>
 					<Port>1235</Port>
 				</MulticastGroup>
-				<Communication_Protocol></Communication_Protocol>
+				<Communication_Protocol>Sockets</Communication_Protocol>
 				<InterOperableCommunication>
 					<Broker>
 						<Vendor>HiveMQ</Vendor>
@@ -76,7 +76,7 @@
 
 		</Thing_Attachment>
 		<Structural_Metadata>
-			<Number_Hardware>0</Number_Hardware>
+			<Number_Hardware>1</Number_Hardware>
 			<Number_Software>0</Number_Software>
 			<Number_Hybrid>0</Number_Hybrid>
 			<Number_Entities>1</Number_Entities>
@@ -85,25 +85,25 @@
 	<Atlas_Entities>
 		<Entity_1>
 			<Descriptive_Metadata>
-				<ID>Entity1</ID>
-				<Name></Name>
+				<ID>AUTO_DOOR</ID>
+				<Name>AUTODOOR</Name>
 				<Owner></Owner>
 				<Vendor></Vendor>
-				<Category></Category>
-				<Type></Type>
+				<Category>Hardware</Category>
+				<Type>Connected</Type>
 				<Description></Description>
 			</Descriptive_Metadata>
 			<Services>
 				<Service_1>
-					<Name>Service1</Name>
-					<AppCategory></AppCategory>
-					<Type></Type>
+					<Name>MOTION_DETECTION</Name>
+					<AppCategory>Ambiance</AppCategory>
+					<Type>Report</Type>
 					<Keywords></Keywords>
 					<Description></Description>
 					<Contextual_Constraints>
-						<Time_Window>30seconds</Time_Window>
-						<Usage_Mode></Usage_Mode>
-						<Concurrent></Concurrent>
+						<Time_Window>10seconds</Time_Window>
+						<Usage_Mode>Single</Usage_Mode>
+						<Concurrent>No</Concurrent>
 					</Contextual_Constraints>
 					<Temporal_Constraints>
 						<Working>
@@ -115,33 +115,54 @@
 							<EndTime>9:30pm</EndTime>
 						</Callable>
 					</Temporal_Constraints>
-					<OutputDescription></OutputDescription>
-					<OutputType>void</OutputType>
+					<OutputDescription>value</OutputDescription>
+					<OutputType>int</OutputType>
 					<Service_Formula><![CDATA[
 // ~ Service body C/C++ code block ~
 // You can use the inputs you defined above by name
 // Any return values should match the specified output type
+int pinID = 12;
+int duration = 5;
 
-int x = 3;
-int z = x + 5;
+gpioInitialise();
+gpioSetMode(pinID, PI_INPUT);
 
-print_value(z);
+struct timespec ts;
+clock_t start, end;
+clock_gettime(CLOCK_MONOTONIC, &ts);
+start = ts.tv_sec;
+
+while (true) {
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    end = ts.tv_sec;
+    if (gpioRead(pinID) == PI_HIGH) {
+        value = 1;
+        break;
+    }
+    if ((end - start) >= duration) {
+        value = 0;
+        break;
+    }
+}
+gpioTerminate();
 
 ]]></Service_Formula>
 					<Service_NumberInputs>0</Service_NumberInputs>
 					<Service_InputTypes></Service_InputTypes>
 					<Service_InputDescriptions></Service_InputDescriptions>
+					<Library_Number>2</Library_Number>
+					<Libraries>pigpio.h,time.h</Libraries>
 				</Service_1>
 				<Service_2>
-					<Name>Service2</Name>
-					<AppCategory></AppCategory>
-					<Type></Type>
+					<Name>SERVO_MOTOR</Name>
+					<AppCategory>Automation</AppCategory>
+					<Type>Action</Type>
 					<Keywords></Keywords>
 					<Description></Description>
 					<Contextual_Constraints>
-						<Time_Window>30seconds</Time_Window>
-						<Usage_Mode></Usage_Mode>
-						<Concurrent></Concurrent>
+						<Time_Window>10seconds</Time_Window>
+						<Usage_Mode>Single</Usage_Mode>
+						<Concurrent>No</Concurrent>
 					</Contextual_Constraints>
 					<Temporal_Constraints>
 						<Working>
@@ -159,178 +180,48 @@ print_value(z);
 // ~ Service body C/C++ code block ~
 // You can use the inputs you defined above by name
 // Any return values should match the specified output type
+int pinID = 18;
+wiringPiSetupGpio();
+pinMode(pinID,PWM_OUTPUT);
+pwmSetMode(PWM_MODE_MS);
+pwmSetRange(2000);
+pwmSetClock(192);
+     
 
-int y = 5;
+for(int i=0;i<180;i = i + 20){
+		pwmWrite(pinID,i);
+		delay(1000);
+}
 
-int z = y + x;
+for(int i=180;i>0;i = i - 20){
+		pwmWrite(pinID,i);
+		delay(1000);
+}
 
-print_value(z);
-]]></Service_Formula>
-					<Service_NumberInputs>1</Service_NumberInputs>
-					<Service_InputTypes>int</Service_InputTypes>
-					<Service_InputDescriptions>"x"</Service_InputDescriptions>
-				</Service_2>
-				<Service_3>
-					<Name>Service3</Name>
-					<AppCategory></AppCategory>
-					<Type></Type>
-					<Keywords></Keywords>
-					<Description></Description>
-					<Contextual_Constraints>
-						<Time_Window>30seconds</Time_Window>
-						<Usage_Mode></Usage_Mode>
-						<Concurrent></Concurrent>
-					</Contextual_Constraints>
-					<Temporal_Constraints>
-						<Working>
-							<StartTime>6am</StartTime>
-							<EndTime>10pm</EndTime>
-						</Working>
-						<Callable>
-							<StartTime>6:30am</StartTime>
-							<EndTime>9:30pm</EndTime>
-						</Callable>
-					</Temporal_Constraints>
-					<OutputDescription></OutputDescription>
-					<OutputType>void</OutputType>
-					<Service_Formula><![CDATA[
-// ~ Service body C/C++ code block ~
-// You can use the inputs you defined above by name
-// Any return values should match the specified output type
-
-int z = X + Y;
-print_value(z);
-
-]]></Service_Formula>
-					<Service_NumberInputs>2</Service_NumberInputs>
-					<Service_InputTypes>int,int</Service_InputTypes>
-					<Service_InputDescriptions>"X","Y"</Service_InputDescriptions>
-				</Service_3>
-				<Service_4>
-					<Name>Service4</Name>
-					<AppCategory></AppCategory>
-					<Type></Type>
-					<Keywords></Keywords>
-					<Description></Description>
-					<Contextual_Constraints>
-						<Time_Window>30seconds</Time_Window>
-						<Usage_Mode></Usage_Mode>
-						<Concurrent></Concurrent>
-					</Contextual_Constraints>
-					<Temporal_Constraints>
-						<Working>
-							<StartTime>6am</StartTime>
-							<EndTime>10pm</EndTime>
-						</Working>
-						<Callable>
-							<StartTime>6:30am</StartTime>
-							<EndTime>9:30pm</EndTime>
-						</Callable>
-					</Temporal_Constraints>
-					<OutputDescription>value</OutputDescription>
-					<OutputType>int</OutputType>
-					<Service_Formula><![CDATA[
-// ~ Service body C/C++ code block ~
-// You can use the inputs you defined above by name
-// Any return values should match the specified output type
-
-
-int z = 67;
-value = z + 3;
-print_value(value);
 
 ]]></Service_Formula>
 					<Service_NumberInputs>0</Service_NumberInputs>
 					<Service_InputTypes></Service_InputTypes>
 					<Service_InputDescriptions></Service_InputDescriptions>
-				</Service_4>
-				<Service_5>
-					<Name>Service5</Name>
-					<AppCategory></AppCategory>
-					<Type></Type>
-					<Keywords></Keywords>
-					<Description></Description>
-					<Contextual_Constraints>
-						<Time_Window>30seconds</Time_Window>
-						<Usage_Mode></Usage_Mode>
-						<Concurrent></Concurrent>
-					</Contextual_Constraints>
-					<Temporal_Constraints>
-						<Working>
-							<StartTime>6am</StartTime>
-							<EndTime>10pm</EndTime>
-						</Working>
-						<Callable>
-							<StartTime>6:30am</StartTime>
-							<EndTime>9:30pm</EndTime>
-						</Callable>
-					</Temporal_Constraints>
-					<OutputDescription>value</OutputDescription>
-					<OutputType>int</OutputType>
-					<Service_Formula><![CDATA[
-// ~ Service body C/C++ code block ~
-// You can use the inputs you defined above by name
-// Any return values should match the specified output type
-
-int z = X +5;
-
-
-value = z + 3;
-print_value(value);
-
-
-]]></Service_Formula>
-					<Service_NumberInputs>1</Service_NumberInputs>
-					<Service_InputTypes>int</Service_InputTypes>
-					<Service_InputDescriptions>"X"</Service_InputDescriptions>
-				</Service_5>
-				<Service_6>
-					<Name>Service6</Name>
-					<AppCategory></AppCategory>
-					<Type></Type>
-					<Keywords></Keywords>
-					<Description></Description>
-					<Contextual_Constraints>
-						<Time_Window>30seconds</Time_Window>
-						<Usage_Mode></Usage_Mode>
-						<Concurrent></Concurrent>
-					</Contextual_Constraints>
-					<Temporal_Constraints>
-						<Working>
-							<StartTime>6am</StartTime>
-							<EndTime>10pm</EndTime>
-						</Working>
-						<Callable>
-							<StartTime>6:30am</StartTime>
-							<EndTime>9:30pm</EndTime>
-						</Callable>
-					</Temporal_Constraints>
-					<OutputDescription>value</OutputDescription>
-					<OutputType>int</OutputType>
-					<Service_Formula><![CDATA[
-// ~ Service body C/C++ code block ~
-// You can use the inputs you defined above by name
-// Any return values should match the specified output type
-
-
-int z = X + Y;
-
-value = z + 3;
-print_value(value);
-
-]]></Service_Formula>
-					<Service_NumberInputs>2</Service_NumberInputs>
-					<Service_InputTypes>int,int</Service_InputTypes>
-					<Service_InputDescriptions>"X","Y"</Service_InputDescriptions>
-				</Service_6>
-				<Number_Services>6</Number_Services>
+					<Library_Number>1</Library_Number>
+					<Libraries>wiringPi.h</Libraries>
+				</Service_2>
+				<Number_Services>2</Number_Services>
 			</Services>
+			<Relationships>
+				<Relationship_1>
+					<Name>AUTO_DOOR</Name>
+					<Establisher>Junjie Li</Establisher>
+					<Description>use motion sensor to trig servo motor</Description>
+					<type>control</type>
+					<Input1>MOTION_DETECTION</Input1>
+					<Input2>SERVO_MOTOR</Input2>
+				</Relationship_1>
+				<Number_Relationships>1</Number_Relationships>
+			</Relationships>
 			<UnboundedService>
 				<Number_UnboundedServices>0</Number_UnboundedServices>
 			</UnboundedService>
-			<Relationships>
-				<Number_Relationships>0</Number_Relationships>
-			</Relationships>
 		</Entity_1>
 	</Atlas_Entities>
 </Atlas_IoTDDL>
