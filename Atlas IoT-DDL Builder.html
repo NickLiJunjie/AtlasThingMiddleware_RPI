@@ -1,0 +1,1980 @@
+<!DOCTYPE html>
+
+<html>
+	<head>
+		<meta charset="utf-8"/>
+		<script src="https://cdn.jsdelivr.net/npm/jquery@3.4.1/dist/jquery.min.js"></script>
+
+		<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/semantic-ui@2.4.2/dist/semantic.min.css">
+		<script src="https://cdn.jsdelivr.net/npm/semantic-ui@2.4.2/dist/semantic.min.js"></script>
+
+		<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.10.0/Sortable.min.js"></script>
+		<script src="https://cdn.jsdelivr.net/ace/1.2.3/noconflict/ace.js"></script>
+
+		<style>
+			body, form { padding: 3em 0em; }
+			h2+h3 { margin-top: -0.5em !important; }
+			.center { text-align: center !important; }
+			.segment.center { margin: auto !important; }
+			.wide { width: 100%; }
+			.tight { margin-bottom: 0px !important; }
+			.add-row, .remove-row, .move-row, .choose { cursor: pointer; }
+			#templates { display: none; }
+			.help { font-size: 0.9rem !important; }
+
+			.accordion .title.subcontrol { pointer-events: none; }
+			.accordion .title.subcontrol .control { pointer-events: all; }
+
+			.accordion .title.disabled {
+				cursor: default !important;
+				font-weight: normal !important;
+				color: darkgrey !important;
+			}
+
+			.ace_editor {
+				width: 100%;
+				height: 16em;
+			}
+		</style>
+
+		<script type="text/javascript">
+			let dataset  = { element: null, args: null };
+			let sections = {
+				entity:       { nextId: 1, elements: {} },
+				service:      { nextId: 1, elements: {}, sorters: {}, librarySorters: {} }, // Add librarySorters
+				unbounded:    { nextId: 1, elements: {} },
+				relationship: { nextId: 1, elements: {}, sorters: {} }
+			};
+
+
+			let setupUI = function (parent = $(document.body).find('form')) {
+				parent.find('.ui.accordion').accordion({ exclusive: false });
+				parent.find('.ui.dropdown:not(.search)').dropdown();
+				parent.find('.ui.dropdown.search').dropdown({ allowAdditions: true }).children('.icon').remove();
+				parent.find('.ui.help').popup();
+				parent.find('.ui.menu .item').tab();
+
+				let editor_node = parent.find('.editor');
+				if (editor_node.length) {
+					let name = editor_node.attr('name');
+					ace.edit(editor_node[0]).session.setMode('ace/mode/c_cpp');
+					parent.find('.ace_editor > textarea').attr('name', name);
+				}
+
+				setupForm();
+			};
+			let setupForm = function (e = null, args = null) {
+				if (e) {
+					dataset.element = e;
+					dataset.args    = args;
+				}
+
+				if (dataset.element)
+					dataset.element.form(dataset.args);
+			}
+
+			let cloneTemplate = function(n, isRow = false) {
+				let template = $('#templates').children(`#${n}`);
+
+				let clone = ((isRow) ? template.children().children() : template).clone();
+				clone.removeAttr('id');
+
+				return clone;
+			}
+			let setIndex = function(parent, id) {
+				parent.find(':input').each(function(i) {
+					let name = $(this).attr('name');
+					if (!name)
+						return;
+
+					let parts = name.split('*');
+					if (parts.length < 2)
+						return;
+
+					let pre  = parts.shift();
+					let post = parts.join('*');
+					$(this).attr('name', pre + id + post);
+				});
+			};
+			let updateDefault = function (t) {
+				mode = (t[0].nodeName == 'TBODY') ? 'table-row' : 'block';
+
+				let nc = t.children().length;
+				if (nc == 1)
+					t.children('.fixed').css({ 'display': mode });
+				else
+					t.children('.fixed').css({ 'display': 'none' });
+			}
+
+			let setupInputRows = function (sid) {
+				let table  = sections.service.elements[sid].find('table.inputs > tbody');
+				let params = { animation: 150, filter: '.fixed' };
+
+				sections.service.sorters[sid] = Sortable.create(table[0], params);
+			}
+
+			let setupLibraryRows = function (sid) {
+				let table = sections.service.elements[sid].find('table.library > tbody');
+				let params = { animation: 150, filter: '.fixed' };
+				
+				sections.service.librarySorters[sid] = Sortable.create(table[0], params);
+			}
+
+			let addToServiceChooser = function(r, e) {
+				if (r.attr('data-entity') != e.attr('data-entity'))
+					return;
+
+				let selects = r.find('.this, .that').find('select');
+				let name = e.attr('data-name');
+
+				selects.append($('<option>', {
+					'text':      name,
+					'data-type': e.attr('data-type'),
+					'data-id':   e.attr('data-id')
+				}));
+			};
+			let createServiceChooser = function (rid) {
+				let r = sections.relationship.elements[rid];
+				let append = function (es) {
+					for (let id in es)
+						addToServiceChooser(r, es[id]);
+				};
+
+				append(sections.service.elements);
+				append(sections.unbounded.elements);
+
+				r.find('.kind > select').change()
+			};
+			let destroyServiceChooser = function (rid) {
+				//
+			};
+			let refreshServiceChoosers = function (e, mode = 'update') {
+				for (let id in sections.relationship.elements) {
+					let r = sections.relationship.elements[id];
+					if (e.attr('data-entity') != r.attr('data-entity'))
+						continue;
+
+					let selects = r.find('.this, .that').find('select');
+					let name = e.attr('data-name');
+					let type = e.attr('data-type');
+					let eid  = e.attr('data-id');
+
+					let option = selects.children(`[data-type="${type}"][data-id="${eid}"]`);
+					switch (mode) {
+						case 'add':
+							addToServiceChooser(r, e);
+							break;
+						case 'update':
+							option.text(name);
+							// FIXME: not reliable
+							selects.closest('.ui.dropdown').dropdown('refresh');
+							break;
+						case 'remove':
+							option.remove();
+							break;
+					}
+				}
+			};
+
+			let updateName = function (elem, name = '') {
+				let type    = elem.attr('data-type');
+				let id      = elem.attr('data-id');
+				let namedef = type.charAt(0).toUpperCase() + type.substr(1).toLowerCase();
+				let namestr = (name) ? name : `${namedef} ${id}`;
+
+				elem.attr('data-name', namestr);
+				if (type == 'service' || type == 'unbounded')
+					refreshServiceChoosers(elem);
+
+				let title = elem.prev();
+				title.find('span').text(namestr);
+
+				return title;
+			};
+
+			let finalizeEditors = function(e) {
+				let editors = $('.ace_editor').each(function() {
+					let editor = $(this);
+					let code   = ace.edit(editor[0]);
+
+					$(e.target).form('set value', editor.find('textarea').attr('name'), code.getValue());
+				});
+			}
+
+			let toObject = function(flatvalues) {
+				let obj = {};
+				for (let key in flatvalues) {
+					let path = key.split('.');
+
+					let parent = obj, i = 0;
+					for (; i != path.length - 1; ++i) {
+						let p = path[i];
+						if (!(p in parent))
+							parent[p] = {};
+
+						parent = parent[p];
+					}
+
+					parent[path[i]] = flatvalues[key];
+				}
+
+				return obj;
+			};
+			let updateKey = function(obj, oldkey, newkey) {
+				if (newkey === oldkey)
+					return;
+
+				obj[newkey] = obj[oldkey];
+				delete obj[oldkey];
+			};
+			let repairIndices = function(obj) {
+				let es = obj['Atlas_Entities'];
+				let en = 1;
+
+				let meta = {
+					'Number_Hardware': 0,
+					'Number_Software': 0,
+					'Number_Hybrid': 0
+				};
+
+				for (let e in es) {
+					let ss = es[e]['Services'];
+					let sn = 1;
+
+					for (let s in ss)
+						updateKey(ss, s, 'Service_' + sn++);
+					if (ss)
+						ss['Number_Services'] = sn - 1;
+					else
+						es[e]['Services'] = { 'Number_Services': 0 };
+
+
+					let us = es[e]['UnboundedService'];
+					let un = 1;
+
+					for (let u in us)
+						updateKey(us, u, 'UB_' + un++);
+
+					if (us)
+						us['Number_UnboundedServices'] = un - 1;
+					else
+						es[e]['UnboundedService'] = { 'Number_UnboundedServices': 0 };
+
+
+					let rs = es[e]['Relationships'];
+					let rn = 1;
+
+					for (let r in rs)
+						updateKey(rs, r, 'Relationship_' + rn++);
+
+
+					if (rs)
+						rs['Number_Relationships'] = rn - 1;
+					else
+						es[e]['Relationships'] = { 'Number_Relationships': 0 };
+
+
+
+
+					switch (es[e]['Descriptive_Metadata']['Category']) {
+						case 'Hardware': meta['Number_Hardware']++; break;
+						case 'Software': meta['Number_Software']++; break;
+						case 'Hybrid':   meta['Number_Hybrid']++;   break;
+					}
+
+					updateKey(es, e, 'Entity_' + en++);
+				}
+
+				meta['Number_Entities'] = en - 1;
+				obj['Atlas_Thing']['Structural_Metadata'] = meta;
+
+			};
+			
+			let repairInputs = function(obj) {
+				let es = obj['Atlas_Entities'];
+				for (let e in es) {
+					let ss = es[e]['Services'];
+					for (let s in ss) {
+						let types = '';
+						let descs = '';
+
+						let is = ss[s]['Inputs'];
+						let ic = 0;
+
+						for (let i in is) {
+							let t = is[i]['Input_Type'];
+							let d = is[i]['Input_Description'];
+
+							types += (types == '') ? `${t}` : `,${t}`;
+							descs += (descs == '') ? `"${d}"` : `,"${d}"`;
+
+							ic++;
+						}
+
+						ss[s]['Service_NumberInputs'] = ic;
+
+						ss[s]['Service_InputTypes'] = types;
+						ss[s]['Service_InputDescriptions'] = descs;
+
+						delete ss[s]['Inputs'];
+
+						let code = ss[s]['Service_Formula'];
+						ss[s]['Service_Formula'] = '<![CDATA[\n' + code + '\n]]>';
+					}
+				}
+			};
+
+			let repairLibraries = function(obj) {
+				let es = obj['Atlas_Entities'];
+				for (let e in es) {
+					let ss = es[e]['Services'];
+					for (let s in ss) {
+						let libraries = '';
+						let lc = 0;
+
+						let ls = ss[s]['Library'];
+						for (let l in ls) {
+							let lib = ls[l];
+							
+							libraries += (libraries == '') ? `${lib}` : `,${lib}`;
+
+							lc++;
+						}
+
+						ss[s]['Library_Number'] = lc;
+						ss[s]['Libraries'] = libraries;
+
+						delete ss[s]['Library'];
+					}
+				}
+			};
+
+
+
+			let repairAttachments = function(obj) {
+				let as = obj['Atlas_Thing']['Thing_Attachment'];
+				for (let a in as) {
+					if (!as[a]['Enabled'])
+						delete as[a];
+					else
+						delete as[a]['Enabled'];
+				}
+			}
+			let toXML = function(value, indent = null) {
+				if (indent === null)
+					return toXML(value, '').value;
+
+				if (value === null || value === undefined)
+					return { value: '', multiline: false };
+
+				let str = '';
+				switch (typeof value) {
+					case 'array':
+						for (let i = 0; i != value.length; ++i) {
+							let r = toXML(value[i], `${indent}\t`);
+							str += `${indent}${r.value}\n`
+						}
+
+						return { value: str, multiline: true };
+					case 'object':
+						let multiline = false;
+						for (let key in value) {
+							let r = toXML(value[key], `${indent}\t`);
+
+							str += `${indent}<${key}>`;
+							str += (r.multiline) ? `\n${r.value}\n${indent}` : r.value;
+							str += `</${key}>\n`;
+						}
+
+						return { value: str.substr(0, str.length - 1), multiline: true };
+					default:
+						return { value: `${value}`, multiline: false };
+				}
+			};
+
+			$(function() {
+				setupUI();
+				$('#update-network').dropdown('setting', 'onChange', function (e) {
+					let mode = 'flex';
+					if (e != 'WiFi')
+						mode = 'none';
+
+					$('#wifi-fields').css({ 'display': mode });
+
+					if (e == 'Ethernet')
+						mode = 'flex';
+
+					$('#ip-fields').css({ 'display': mode });
+				});
+
+				$('.delegate').on('click', '.ui.add-section', function (e) {
+					let type = $(this).attr('data-target');
+					let dst  = $(this).siblings(`[data-section='${type}']:first`);
+					let id   = sections[type].nextId++;
+
+					let title   = cloneTemplate('section-title');
+					let content = cloneTemplate(type);
+					content.attr({
+						'data-id':   id,
+						'data-type': type
+					});
+
+					if (type != 'entity') {
+						let parent = $(this).closest('[data-type="entity"]');
+						let eid    = parent.attr('data-id');
+
+						content.attr('data-entity', eid);
+						setIndex(content, eid);
+					}
+
+					sections[type].elements[id] = content;
+					dst.append(title, content);
+
+					setIndex(content, id);
+					updateDefault(dst);
+
+					switch (type) {
+						case 'service':
+							setupInputRows(id);
+							setupLibraryRows(id);
+							content.find('.update-statement').change()
+							refreshServiceChoosers(content, 'add');
+							break;
+						case 'unbounded':
+							refreshServiceChoosers(content, 'add');
+							break;
+						case 'relationship':
+							createServiceChooser(id);
+							break;
+					}
+
+					updateName(content).click();
+					setupUI(content);
+				});
+				$('.delegate').on('click', '.ui.remove-section', function (e) {
+					let title   = $(this).closest('.title');
+					let content = title.next();
+					let type    = content.attr('data-type');
+					let id      = content.attr('data-id');
+
+					let timeout = 200;
+					if (title.hasClass('active')) {
+						e.stopPropagation();
+						timeout = 0;
+					}
+
+					let parent = content.parent();
+					setTimeout(function() {
+						delete sections[type].elements[id];
+
+						title.remove();
+						content.remove();
+
+						updateDefault(parent);
+					}, timeout);
+
+					switch (type) {
+						case 'service':
+						case 'unbounded':
+							refreshServiceChoosers(content, 'remove');
+							break;
+						case 'relationship':
+							destroyServiceChooser(id);
+							break;
+					}
+				});
+
+				$('.delegate').on('input', 'input.name', function (e) {
+					let name    = $(this).val();
+					let content = $(this).closest('.content');
+
+					updateName(content, name);
+				});
+				$('.delegate').on('change', '.update-statement', function (e) {
+					let parent = $(this).closest('.functionality');
+					let fields = parent.find('.statements');
+
+					fields.children('div').css({ 'display': 'none' });
+
+					let stmt = $(this).find('option:selected').val();
+					fields.find(`div[data-statement='${stmt}']`).css({ 'display': 'flex' });
+				});
+				$('.delegate').on('change', '.update-relationship', function (e) {
+					let parent = $(this).closest('.behavior');
+					let fields = parent.find('.this, .that');
+
+					fields.children('label').css({ 'display': 'none' });
+
+					let kind = $(this).find('option:selected').val();
+					fields.find(`label[data-kind='${kind}']`).css({ 'display': 'block' });
+				});
+
+				$('.delegate').on('click', '.ui.add-row', function (e) {
+					let target = $(this).attr('data-target');
+					let dst    = $(this).closest('table').children('tbody');
+					let parent = $(this).closest('[data-type="service"]');
+
+					let row = cloneTemplate(target, true).appendTo(dst);
+					updateDefault(dst);
+
+					setIndex(row, parent.attr('data-entity'));
+					setIndex(row, parent.attr('data-id'));
+					setIndex(row, dst.children().length - 1);
+
+					setupUI();
+				});
+				$('.delegate').on('click', '.ui.remove-row', function (e) {
+					let row    = $(this).closest('tr');
+					let parent = $(this).closest('tbody')
+
+					row.remove();
+					updateDefault(parent);
+				});
+
+				$('.delegate').on('click', '.ui.add-library-row', function (e) {
+					let target = $(this).attr('data-target');
+					let dst = $(this).closest('table').children('tbody');
+					let parent = $(this).closest('[data-type="service"]');
+
+					let row = cloneTemplate(target, true).appendTo(dst);
+					updateDefault(dst);
+
+					setIndex(row, parent.attr('data-entity'));
+					setIndex(row, parent.attr('data-id'));
+					setIndex(row, dst.children().length - 1);
+
+					setupUI();
+				});
+				$('.delegate').on('click', '.ui.remove-library-row', function (e) {
+					let row = $(this).closest('tr');
+					let parent = $(this).closest('tbody')
+
+					row.remove();
+					updateDefault(parent);
+				});
+
+				$('.delegate').on('click', '.ui.add-statement', function (e) {
+					let parent = $(this).closest('.functionality');
+
+					let code = undefined;
+					switch(parent.find('.update-statement').find('option:selected').val()) {
+						case 'print_value':
+							code = `print_value(${parent.find('#print-value').val()});`;
+							break;
+
+						case 'print_string':
+							code = `print_string("${parent.find('#print-string').val()}");`;
+							break;
+
+						case 'DigitalWrite_High':
+							code = `DigitalWrite_High(${parent.find('#digitalwrite_high-pin').val()});`;
+							break;
+
+						case 'DigitalWrite_Low':
+							code = `DigitalWrite_Low(${parent.find('#digitalwrite_low-pin').val()});`;
+							break;
+
+						case 'Delay':
+							code = `Delay(${parent.find('#Delay-value').val()});`;
+							break;
+
+						case 'DigitalWrite_Blink':
+							code = `DigitalWrite_Blink(${parent.find('#DigitalWrite_Blink-pin').val()}, ${parent.find('#DigitalWrite_Blink-delayValue').val()});`;
+							break;
+
+
+						case 'AnalogWrite':
+							code = `AnalogWrite(${parent.find('#AnalogWrite-pin').val()}, ${parent.find('#AnalogWrite-Value').val()});`;
+							break;
+
+
+						case 'DigitalRead':
+							code = `int value = DigitalRead(${parent.find('#DigitalRead-pin').val()});`;
+							break;
+
+
+						case 'AnalogRead':
+							code = `int value = AnalogRead(${parent.find('#AnalogRead-pin').val()});`;
+							break;
+
+					}
+
+					if (code === undefined)
+						return;
+
+					let editor = ace.edit(parent.find('.ace_editor')[0]);
+					editor.setValue(editor.getValue() + '\n' + code);
+				});
+
+				let rules = $.fn.form.settings.rules;
+				rules.ip   = function(v) { return (v == '' || rules.regExp(v, /^(?!0)(?!.*\.$)((1?\d?\d|25[0-5]|2[0-4]\d)(\.|$)){4}$/)); };
+				rules.port = function(v) { return (v == '' || rules.integer(v, '0..65535')); };
+				rules.code = function(v) {
+					//
+				};
+
+				setupForm($('#ddl-form'), {
+					fields: {
+						'Atlas_Thing.Descriptive_Metadata.Thing_ATID' : 'empty',
+						'Atlas_Thing.Descriptive_Metadata.Thing_SSID' : 'empty',
+						'Atlas_Thing.Administrative_Metadata.Network_Manager.OMA-DM_IP' : 'ip',
+						'Atlas_Thing.Administrative_Metadata.Network_Manager.OMA-DM_Port' : 'port'
+					},
+					onSuccess: function (e) {
+						finalizeEditors(e);
+
+						let values = $(e.target).form('get values');
+
+						let ddl = toObject(values);
+						repairIndices(ddl);
+						repairInputs(ddl);
+						repairAttachments(ddl);
+						repairLibraries(ddl);
+
+						let xml = toXML({ 'Atlas_IoTDDL': ddl });
+						$('#download-button').attr({
+							href: 'data:text/plain;charset=UTF-8,' + encodeURIComponent(xml),
+							download: 'Atlas_IoTDDL.xml',
+						});
+
+						console.log(xml);
+
+						$('#download-modal').modal('show');
+						return false;
+					}
+				});
+			});
+		</script>
+
+		<title>Atlas IoT-DDL Builder</title>
+	</head>
+
+	<body>
+		<form class="ui form success" id="ddl-form" autocomplete="off">
+			<div class="ui container">
+				<h1 class="ui header center">Atlas IoT-DDL Builder Tool (v1.0)</h1>
+				<h2 class="ui header center">Configure your Atlas Thing, Resources, and Services using the IoT-DDL description language</h2>
+				<br>
+				<h3 class="ui header center"><i>The IoT-DDL configuration file is divided into segments, click on each segment below to learn more about the different configurations for your thing!</i></h3>
+				<br>
+				<br>
+				<div class="ui top attached tabular menu">
+					<a class="active item" data-tab="desc">Descriptive Metadata</a>
+					<a class="item" data-tab="struct">Structural and Administrative Metadata</a>
+					<a class="item" data-tab="entity">Entities, Services, and Relationships</a>
+					<a class="item" data-tab="attach">Thing Attachments</a>
+					<a class="item" data-tab="help" style="color: #dd581f;"><b>HELP ! ... </b> <i> a step-by-step guide</i></a>
+				</div>
+
+				<!--------------------------------------------------------------------------------------------------->
+				<!-----------------------------The descriptive meta-data of Atlas thing------------------------------>
+				<!--------------------------------------------------------------------------------------------------->
+
+				<div class="ui bottom attached active tab segment" data-tab="desc">
+
+					<h4 class="ui dividing header">Thing Information</h4>
+
+					<div class="two fields">
+						<div class="field required">
+							<label>ID <span class="ui icon help" data-content="A unique identifier for your Atlas thing; a combination of characters and digits (e.g., AT_SmartLamp23).">
+								<i class="question circle icon"></i>
+							</span></label>
+							<input type="text" name="Atlas_Thing.Descriptive_Metadata.Thing_ATID" value="MySmartThing01" placeholder="place a unique identifier to your thing"/>
+						</div>
+
+						<div class="field">
+							<label>Name <span class="ui icon help" data-content="What is your Atlas thing? (e.g., Smart Lamp, DVD Player).">
+								<i class="question circle icon"></i>
+							</span></label>
+							<input type="text" name="Atlas_Thing.Descriptive_Metadata.Thing_Name" placeholder="add a short name to your thing"/>
+						</div>
+					</div>
+
+					<div class="four fields">
+
+						<div class="field">
+							<label>Owner <span class="ui icon help" data-content="Who is owner of your smart thing? (e.g., yourself, your company, your university).">
+								<i class="question circle icon"></i>
+							</span></label>
+							<input type="text" name="Atlas_Thing.Descriptive_Metadata.Thing_Owner" placeholder="identify who owns this thing"/>
+						</div>
+
+						<div class="field">
+							<label>Vendor <span class="ui icon help" data-content="Who is vendor of your smart thing? (e.g., Samsung, Wemo, or your are the vendor).">
+								<i class="question circle icon"></i>
+							</span></label>
+							<input type="text" name="Atlas_Thing.Descriptive_Metadata.Thing_Vendor" placeholder="identify the vendor of your thing"/>
+						</div>
+
+						<div class="field">
+							<label>Model <span class="ui icon help" data-content="What is the model of this thing? (e.g., Samsung S8+, WeMo 2nd Gen).">
+								<i class="question circle icon"></i>
+							</span></label>
+							<input type="text" name="Atlas_Thing.Descriptive_Metadata.Thing_Model"  placeholder="identify the model of your thing"/>
+						</div>
+
+						<div class="field">
+							<label>Release Date <span class="ui icon help" data-content="What is the release month/year of your smart thing?">
+								<i class="question circle icon"></i>
+							</span></label>
+							<input type="text" name="Atlas_Thing.Descriptive_Metadata.Thing_ReleaseDate" value="8/2020"/>
+						</div>
+					</div>
+
+					<div class="field">
+							<label>Type <span class="ui icon help" data-content="Is your thing is an Edge device, sofware application, or other?">
+								<i class="question circle icon"></i>
+							</span></label>
+							<select class="ui fluid dropdown" name="Atlas_Thing.Descriptive_Metadata.Thing_Type">
+								<option value="" disabled selected>Select the type of your thing</option>
+								<option value="Thing of Things">Platform Thing (e.g., Arduino, Libelium, Beaglebone, Raspberry Pi)</option>
+								<option value="Thing of Things" disabled>Sensor Mote Thing (e.g., WiSense, MICA)</option>
+								<option value="Bit Thing" disabled>Bit Thing (e.g., simple sensor, actuator, RFID/NFC tag, BLE beacon)</option>
+								<option value="Soft Thing" disabled>Soft Thing (e.g., Desktop App, mobile App, script, tool, library)</option>
+								<option value="Powerful Thing" disabled>Low-end Platform (e.g., Smartphone, Smart watch, tablet, Google Glass, Domestic Robot)</option>
+								<option value="Powerful Thing" disabled>High-end Platform (e.g., Home Appliance, RFID Reader, Traffic System, Smart Car)</option>
+								<option value="Edge Thing" disabled>Edge Thing (e.g., Computing terminal, Server, Set-top box, Data warehouse)</option>
+							</select>
+					</div>
+
+					<div class="field">
+							<label>Operating System <span class="ui icon help" data-content="What is the operating system that runs your thing? (e.g., Raspberry Linux for Raspberry Pi, Android for Smartphone).">
+								<i class="question circle icon"></i>
+							</span></label>
+							<select class="ui fluid dropdown" name="Atlas_Thing.Descriptive_Metadata.Thing_OperatingSystem">
+								<option value="" disabled selected>Select the operating system/kernel that runs your thing</option>
+								<option value="Raspbian"> Raspberry Linux (e.g., Raspberry Pi Model B, Raspberry Pi Model A) </option>
+								<option value="Debian"> Debian Linux (e.g., Beaglebone)</option>
+								<option value="mbedOS" disabled> mbedOS (e.g., ARM-based platforms)</option>
+								<option value="Android" disabled> Android (e.g., Android Smartphone, Android Tablet)- mbedOS</option>
+								<option value="Arduino" disabled> Arduino kernel (e.g., Arduino Uno, Libelium)</option>
+							</select>
+					</div>
+
+					<div class="field">
+						<label>Description <span class="ui icon help" data-content="A short description for the function of your thing.">
+							<i class="question circle icon"></i>
+						</span></label>
+						<input type="text" name="Atlas_Thing.Descriptive_Metadata.Thing_ShortDescription"  placeholder="add a short description on the nature your thing"/>
+					</div>
+
+					<div class="field">
+						<label>Comments <span class="ui icon help" data-content="Describe your thing in more detail.">
+							<i class="question circle icon"></i>
+						</span></label>
+						<textarea name="Atlas_Thing.Descriptive_Metadata.LongDescription" placeholder="add more comments describing your thing"></textarea>
+					</div>
+
+					<br>
+					<h4  class="ui header center"><i>once you describe your thing, use the following dialogs to describe where you deploy your thing</i></h4>
+					<br>
+
+					<h4 class="ui dividing header">Smart Space Information</h4>
+
+					<div class="two fields">
+						<div class="field required">
+							<label>ID <span class="ui icon help" data-content="A unique identifier for your smart space where you deploy the thing; a combination of characters and digits (e.g., ST_Living345). this is a common to all devices in the same smart space.">
+								<i class="question circle icon"></i>
+							</span></label>
+							<input type="text" name="Atlas_Thing.Descriptive_Metadata.Thing_SSID" value="MySmartSpace" placeholder="place a unique identifier to your smart space"/>
+						</div>
+						<div class="field">
+							<label>Coordinates <span class="ui icon help" data-content="The approximated GPS coordinates of your smart space: LAX, LAT.">
+								<i class="question circle icon"></i>
+							</span></label>
+							<input type="text" name="Atlas_Thing.Descriptive_Metadata.Space_Coordinates" placeholder="provide the GPS coordinates of your smart space (e.g., 41.9, -87.7)"/>
+						</div>
+					</div>
+
+					<div class="field">
+							<label>Name <span class="ui icon help" data-content="What is your smart space? (e.g., living Room, Kitchen).">
+								<i class="question circle icon"></i>
+							</span></label>
+							<select class="ui fluid dropdown" name="Atlas_Thing.Descriptive_Metadata.Space_Name">
+								<option value="" disabled selected>Select the name of location you deploy your thing</option>
+								<option value="Bedroom">Bedroom</option>
+								<option value="Living Room">Living Room</option>
+								<option value="Office">Office</option>
+								<option value="Kitchen">Kitchen</option>
+								<option value="Classroom">Classroom</option>
+							</select>
+					</div>
+
+					<div class="field">
+						<label>Description <span class="ui icon help" data-content="Provide a short description of your smart space (e.g., master bedroom of the house).">
+							<i class="question circle icon"></i>
+						</span></label>
+						<input type="text" name="Atlas_Thing.Descriptive_Metadata.Space_Description"   placeholder="add a short description on the smart space"/>
+					</div>
+
+					<div class="field">
+						<label>Space Constraints <span class="ui icon help" data-content="define the environmental/physical constraints your thing needs from the smart space for a safe operation (e.g., the minimum and maximum temperature of the smart space to accommodate your thing)">
+							<i class="question circle icon"></i>
+						</span></label>
+						<table class="ui compact white definition table">
+							<thead>
+								<th></th>
+								<th>Lower Bound</th>
+								<th>Upper Bound</th>
+							</thead>
+							<tbody>
+								<tr><td>Temperature</td>
+
+									<td><input type="text" name="Atlas_Thing.Descriptive_Metadata.Space_Constraints.Temperature.Lower_Bound" placeholder="10C"/></td>
+								    	<td><input type="text" name="Atlas_Thing.Descriptive_Metadata.Space_Constraints.Temperature.Upper_Bound" placeholder="35C"/></td></tr>
+
+								<tr><td>Humidity</td>
+									<td><input type="text" name="Atlas_Thing.Descriptive_Metadata.Space_Constraints.Humidity.Lower_Bound" placeholder="10%"/></td>
+								    	<td><input type="text" name="Atlas_Thing.Descriptive_Metadata.Space_Constraints.Humidity.Upper_Bound" placeholder="40%"/></td></tr>
+
+								<tr><td>Voltage</td>
+									<td><input type="text" name="Atlas_Thing.Descriptive_Metadata.Space_Constraints.Voltage.Lower_Bound" placeholder="110V"/></td>
+								    	<td><input type="text" name="Atlas_Thing.Descriptive_Metadata.Space_Constraints.Voltage.Upper_Bound" placeholder="220V"/></td></tr>
+							</tbody>
+						</table>
+					</div>
+
+					<div class="two fields">
+						<div class="field">
+							<label>Radio Interference Radius <span class="ui icon help" data-content="if your thing uses radio waves for operation, define the radio radius to avoid interference with other devices in the smart space">
+								<i class="question circle icon"></i>
+							</span></label>
+							<input type="text" name="Atlas_Thing.Descriptive_Metadata.Space_Constraints.Radio_Interference_Radius" placeholder="0"/>
+						</div>
+						<div class="field">
+							<label>Safe Temperature Radius <span class="ui icon help" data-content="if your thing produces heat when turned on, define the heat radius to avoid interference with other devices in the smart space">
+								<i class="question circle icon"></i>
+							</span></label>
+							<input type="text" name="Atlas_Thing.Descriptive_Metadata.Space_Constraints.Safe_Temperature_Radius" placeholder="0"/>
+						</div>
+					</div>
+
+				</div>
+
+				<!--------------------------------------------------------------------------------------------------->
+				<!---------------The structural and administrative meta-data of Atlas thing-------------------------->
+				<!--------------------------------------------------------------------------------------------------->
+
+				<div class="ui bottom attached tab segment" data-tab="struct">
+
+					<h4 class="ui dividing header">Network Module</h4>
+
+					<div class="two fields">
+
+						<div class="field">
+							<label>Technology <span class="ui icon help" data-content="Which network module is equipped by your thing? (e.g., WiFi, Bluetooth).">
+								<i class="question circle icon"></i>
+							</span></label>
+							<select class="ui fluid dropdown" id="update-network" name="Atlas_Thing.Administrative_Metadata.Network_Manager.Module">
+								<option value="" disabled selected>Select the network technology or module</option>
+								<option value="WiFi">WiFi (your thing has a wireless connection to the router</option>
+								<option value="Ethernet">Ethernet (your thing has a wired connected to the router)</option>
+								<option value="Bluetooth" disabled>Bluetooth</option>
+								<option value="BLE" disabled>Bluetooth Low Energy</option>
+							</select>
+						</div>
+						<div class="field">
+							<label>Type <span class="ui icon help" data-content="What is the type of such network module? (e.g., build in module to your thing).">
+								<i class="question circle icon"></i>
+							</span></label>
+							<select class="ui fluid dropdown" name="Atlas_Thing.Administrative_Metadata.Network_Manager.Type">
+								<option value="" disabled selected>Select the type of network module</option>
+								<option value="Built-In">Built-In on your thing</option>
+								<option value="Attached">Attached to your thing</option>
+							</select>
+						</div>
+					</div>
+
+					<div class="two fields" id="wifi-fields">
+						<div class="field">
+							<label>Network Name (SSID) <span class="ui icon help" data-content="In case you select Wifi, provide the name of your network (e.g., the name of your home Wifi)">
+								<i class="question circle icon"></i>
+							</span></label>
+							<input type="text" name="Atlas_Thing.Administrative_Metadata.Network_Manager.Network_Name" value="MySpaceNetwork"/>
+						</div>
+						<div class="field">
+							<label>Network Password (PSK) <span class="ui icon help" data-content="In case you select Wifi, provide the passcode of your network (e.g., the passcode of your home Wifi)">
+								<i class="question circle icon"></i>
+							</span></label>
+							<input type="password" name="Atlas_Thing.Administrative_Metadata.Network_Manager.Network_Passcode" value="MySpaceNetwork"/>
+						</div>
+					</div>
+
+					<div class="two fields" id="ip-fields">
+						<div class="field">
+							<label>Multicast Address <span class="ui icon help" data-content="">
+								<i class="question circle icon"></i>
+							</span></label>
+							<input type="text" name="Atlas_Thing.Administrative_Metadata.Network_Manager.MulticastGroup.IP" value="232.1.1.1"/>
+						</div>
+						<div class="field">
+							<label>Multicast Port <span class="ui icon help" data-content="">
+								<i class="question circle icon"></i>
+							</span></label>
+							<input type="text" name="Atlas_Thing.Administrative_Metadata.Network_Manager.MulticastGroup.Port" value="1235"/>
+						</div>
+					</div>
+
+
+					<div class="field">
+						<label>Communication Protocol <span class="ui icon help" data-content="Which communication protocol does your thing use for communication? (e.g., REST-HTTP).">
+							<i class="question circle icon"></i>
+						</span></label>
+						<select class="ui fluid dropdown" name="Atlas_Thing.Administrative_Metadata.Network_Manager.Communication_Protocol">
+							<option value="" disabled selected>Select the communication protocol your thing use</option>
+							<option value="Sockets"> TCP/IP Sockets</option>
+							<option value="MQTT">MQTT: Message Queuing Telemetry Transport</option>
+							<option value="REST-HTTP" disabled> REST: Representational state transfer HTTP</option>
+							<option value="CoAP" disabled>CoAP: Constrained Application Protocol</option>
+						</select>
+					</div>
+
+					<br>
+					<h4  class="ui header center"><i>use the following dialog for your thing, through our protocol translator, to communicate with other things that use different technologies, protocols, and modules</i></h4>
+					<br>
+
+					<h4 class="ui dividing header">Inter-Operable Communication</h4>
+
+					<div class="two fields">
+						<div class="field">
+							<label>Broker Vendor <span class="ui icon help" data-content="The vendor of the global/local broker to enable the inter-operable communication between things">
+								<i class="question circle icon"></i>
+							</span></label>
+							<input type="text" name="Atlas_Thing.Administrative_Metadata.Network_Manager.InterOperableCommunication.Broker.Vendor" value="HiveMQ"/>
+						</div>
+						<div class="field">
+							<label>Broker Dashboard <span class="ui icon help" data-content="The online dashboard of the global/local broker if existed">
+								<i class="question circle icon"></i>
+							</span></label>
+							<input type="text" name="Atlas_Thing.Administrative_Metadata.Network_Manager.InterOperableCommunication.Broker.Dashboard" value="http://www.mqtt-dashboard.com/"/>
+						</div>
+					</div>
+
+					<div class="two fields">
+						<div class="field">
+							<label>Broker IP <span class="ui icon help" data-content="The Internet address (IP) of the global or local broker for the inter-operable communication">
+								<i class="question circle icon"></i>
+							</span></label>
+							<input type="text" name="Atlas_Thing.Administrative_Metadata.Network_Manager.InterOperableCommunication.Broker.IP" value="broker.hivemq.com"/>
+						</div>
+						<div class="field">
+							<label>Broker Port <span class="ui icon help" data-content="The Port address of the global or local broker for the inter-operable communication">
+								<i class="question circle icon"></i>
+							</span></label>
+							<input type="text" name="Atlas_Thing.Administrative_Metadata.Network_Manager.InterOperableCommunication.Broker.Port" value="1883"/>
+						</div>
+					</div>
+
+					<div class="field">
+						<label>Topics <span class="ui icon help" data-content="The different topics through which things and protocol translators can communicate to enable inter-operable communication">
+							<i class="question circle icon"></i>
+						</span></label>
+
+						<table class="ui compact white table">
+							<thead>
+								<th>Name</th>
+								<th>Path</th>
+							</thead>
+							<tbody>
+								<tr><td>Root</td><td>				<input type="text" name="Atlas_Thing.Administrative_Metadata.Network_Manager.InterOperableCommunication.Topic.Root" 						value="/Atlas"/></td></tr>
+								<tr><td>Network MQTT Client</td><td>		<input type="text" name="Atlas_Thing.Administrative_Metadata.Network_Manager.InterOperableCommunication.Topic.Network_MQTTClient" 			value="/Network/MQTT_Client"/></td></tr>
+								<tr><td>Network Private Broker</td><td>		<input type="text" name="Atlas_Thing.Administrative_Metadata.Network_Manager.InterOperableCommunication.Topic.Network_PrivateBroker" 		value="/Network/Private_Broker"/></td></tr>
+								<tr><td>Multicast Thing Identity</td><td>	<input type="text" name="Atlas_Thing.Administrative_Metadata.Network_Manager.InterOperableCommunication.Topic.Multicast_ThingIdentity" 		value="/Multicast/Tweet_ThingIdentity"/></td></tr>
+								<tr><td>Multicast Entity Identity</td><td>	<input type="text" name="Atlas_Thing.Administrative_Metadata.Network_Manager.InterOperableCommunication.Topic.Multicast_EntityIdentity" 	value="/Multicast/Tweet_EntityIdentity"/></td></tr>
+								<tr><td>Multicast API</td><td>			<input type="text" name="Atlas_Thing.Administrative_Metadata.Network_Manager.InterOperableCommunication.Topic.Multicast_API" 				value="/Multicast/API"/></td></tr>
+								<tr><td>Unicast</td><td>			<input type="text" name="Atlas_Thing.Administrative_Metadata.Network_Manager.InterOperableCommunication.Topic.Unicast" 						value="/Unicast/Interaction"/></td></tr>
+							</tbody>
+						</table>
+					</div>
+
+
+
+					<br>
+					<h4  class="ui header center"><i>use the following dialog to enable the remote management, using OMA-DM LwM2M protocol, for your thing</i></h4>
+					<br>
+
+					<h4 class="ui dividing header">Device Management (DM)</h4>
+
+					<div class="fields">
+						<div class="eight wide field">
+							<label>Vendor <span class="ui icon help" data-content="The vendor of the global or local device management server">
+								<i class="question circle icon"></i>
+							</span></label>
+							<input type="text" name="Atlas_Thing.Administrative_Metadata.Network_Manager.OMA_DM.AccessName" value="Eclipse Leshan"/>
+						</div>
+						<div class="four wide field">
+							<label>IP Address <span class="ui icon help" data-content="The Internet address (IP) of the global or local device management server">
+								<i class="question circle icon"></i>
+							</span></label>
+							<input type="text" name="Atlas_Thing.Administrative_Metadata.Network_Manager.OMA_DM.IP" value="coap://leshan.eclipseprojects.io"/>
+						</div>
+						<div class="four wide field">
+							<label>Port <span class="ui icon help" data-content="The Port address of the global or local device management server">
+								<i class="question circle icon"></i>
+							</span></label>
+							<input type="text" name="Atlas_Thing.Administrative_Metadata.Network_Manager.OMA_DM.Port" value="5683"/>
+						</div>
+					</div>
+
+					<h4 class="ui dividing header">Memory Units</h4>
+
+					<div class="three fields">
+						<div class="field">
+							<label>Storage Format <span class="ui icon help" data-content="Select the format to store data and information on thing ">
+								<i class="question circle icon"></i>
+							</span></label>
+							<select class="ui fluid dropdown" name="Atlas_Thing.Administrative_Metadata.Memory_Manager.Store_Format">
+								<option value="" disabled selected>Select the storage format</option>
+								<option>Binary</option>
+								<option>Plaintext</option>
+							</select>
+						</div>
+						<div class="field">
+							<label>Application Storage <span class="ui icon help" data-content="Select the storage unit to store IoT application/recipes on thing">
+								<i class="question circle icon"></i>
+							</span></label>
+							<select class="ui fluid dropdown" name="Atlas_Thing.Administrative_Metadata.Memory_Manager.MemoryUnit_Application">
+								<option value="" disabled selected>Select the storage unit</option>
+								<option>RAM</option>
+								<option>Flash</option>
+							</select>
+						</div>
+						<div class="field">
+							<label>Knowledge Storage <span class="ui icon help" data-content="Select the storage unit to store IoT knowledge either received from the uploaded IoTDDL or received from other things in the smart space through tweets">
+								<i class="question circle icon"></i>
+							</span></label>
+							<select class="ui fluid dropdown" name="Atlas_Thing.Administrative_Metadata.Memory_Manager.MemoryUnit_Knowledge">
+								<option value="" disabled selected>Select the storage unit</option>
+								<option>RAM</option>
+								<option>Flash</option>
+							</select>
+						</div>
+					</div>
+				</div>
+
+				<!--------------------------------------------------------------------------------------------------->
+				<!-----------------------------------------Entities of Atlas thing----------------------------------->
+				<!--------------------------------------------------------------------------------------------------->
+
+				<div class="ui bottom attached tab segment delegate" data-tab="entity">
+
+					<div class="ui fluid styled accordion" data-section="entity">
+						<div class="fixed disabled title"><i>Currently no entities are defined for your thing</i></div>
+					</div>
+
+					<br/>
+					<div class="ui add-section button" data-target="entity">Add an Entity</div>
+				</div>
+
+				<!--------------------------------------------------------------------------------------------------->
+				<!--------------------------------------Attachments of Atlas thing----------------------------------->
+				<!--------------------------------------------------------------------------------------------------->
+
+				<div class="ui bottom attached tab segment" data-tab="attach">
+					<div class="ui fluid styled accordion">
+						<div class="subcontrol title">
+							<table class="wide"><tr>
+								<td><i class="dropdown icon"></i> Interactions Repository</td>
+								<td align="right"><div class="ui fitted toggle checkbox control">
+									<input type="checkbox" name="Atlas_Thing.Thing_Attachment.Interactions_Repository.Enabled"/>
+									<label></label>
+								</div></td>
+							</tr></table>
+						</div>
+						<div class="content">
+							<div class="two fields">
+								<div class="field">
+									<label>URI <span class="ui icon help" data-content="">
+										<i class="question circle icon"></i>
+									</span></label>
+									<input type="text" name="Atlas_Thing.Thing_Attachment.Interactions_Repository.URI"/>
+								</div>
+								<div class="field">
+									<label>Message Format <span class="ui icon help" data-content="">
+										<i class="question circle icon"></i>
+									</span></label>
+									<select class="ui fluid dropdown" name="Atlas_Thing.Thing_Attachment.Interactions_Repository.MessageFormat">
+										<option>Binary</option>
+										<option>JSON</option>
+										<option>Plaintext</option>
+									</select>
+								</div>
+							</div>
+							<div class="three fields">
+								<div class="field">
+									<label>Key <span class="ui icon help" data-content="">
+										<i class="question circle icon"></i>
+									</span></label>
+									<input type="text" name="Atlas_Thing.Thing_Attachment.Interactions_Repository.Key"/>
+								</div>
+								<div class="field">
+									<label>Login Name <span class="ui icon help" data-content="">
+										<i class="question circle icon"></i>
+									</span></label>
+									<input type="text" name="Atlas_Thing.Thing_Attachment.Interactions_Repository.LoginName"/>
+								</div>
+								<div class="field">
+									<label>Login Password <span class="ui icon help" data-content="">
+										<i class="question circle icon"></i>
+									</span></label>
+									<input type="password" name="Atlas_Thing.Thing_Attachment.Interactions_Repository.LoginPassword"/>
+								</div>
+							</div>
+						</div>
+
+						<div class="subcontrol title">
+							<table class="wide"><tr>
+								<td><i class="dropdown icon"></i> Protocol Translator</td>
+								<td align="right"><div class="ui fitted toggle checkbox control">
+									<input type="checkbox" name="Atlas_Thing.Thing_Attachment.Protocol_Translator.Enabled"/>
+									<label></label>
+								</div></td>
+							</tr></table>
+						</div>
+						<div class="content">
+							<div class="fields">
+								<div class="eight wide field">
+									<label>URI <span class="ui icon help" data-content="">
+										<i class="question circle icon"></i>
+									</span></label>
+									<input type="text"/>
+								</div>
+								<div class="four wide field">
+									<label>Port <span class="ui icon help" data-content="">
+										<i class="question circle icon"></i>
+									</span></label>
+									<input type="text"/>
+								</div>
+								<div class="four wide field">
+									<label>Type <span class="ui icon help" data-content="">
+										<i class="question circle icon"></i>
+									</span></label>
+									<select class="ui fluid dropdown">
+										<option>On-Thing</option>
+										<option>Off-Thing</option>
+									</select>
+								</div>
+							</div>
+							<div class="three fields">
+								<div class="field">
+									<label>Key <span class="ui icon help" data-content="">
+										<i class="question circle icon"></i>
+									</span></label>
+									<input type="text"/>
+								</div>
+								<div class="field">
+									<label>Login Password <span class="ui icon help" data-content="">
+										<i class="question circle icon"></i>
+									</span></label>
+									<input type="password"/>
+								</div>
+								<div class="field">
+									<label>Availability <span class="ui icon help" data-content="">
+										<i class="question circle icon"></i>
+									</span></label>
+									<select class="ui fluid dropdown">
+										<option>Enabled</option>
+										<option>Disabled</option>
+									</select>
+								</div>
+							</div>
+						</div>
+
+						<div class="subcontrol title">
+							<table class="wide"><tr>
+								<td><i class="dropdown icon"></i> Collected Data Repository (Logserver)</td>
+								<td align="right"><div class="ui fitted toggle checkbox control">
+									<input type="checkbox" name="Atlas_Thing.Thing_Attachment.Logserver.Enabled"/>
+									<label></label>
+								</div></td>
+							</tr></table>
+						</div>
+						<div class="content">
+							<div class="two fields">
+								<div class="field">
+									<label>URI <span class="ui icon help" data-content="">
+										<i class="question circle icon"></i>
+									</span></label>
+									<input type="text"/>
+								</div>
+								<div class="field">
+									<label>Message Format <span class="ui icon help" data-content="">
+										<i class="question circle icon"></i>
+									</span></label>
+									<select class="ui fluid dropdown">
+										<option>Binary</option>
+										<option>JSON</option>
+										<option>Plaintext</option>
+									</select>
+								</div>
+							</div>
+							<div class="three fields">
+								<div class="field">
+									<label>Key <span class="ui icon help" data-content="">
+										<i class="question circle icon"></i>
+									</span></label>
+									<input type="text"/>
+								</div>
+								<div class="field">
+									<label>Login Name <span class="ui icon help" data-content="">
+										<i class="question circle icon"></i>
+									</span></label>
+									<input type="text"/>
+								</div>
+								<div class="field">
+									<label>Login Password <span class="ui icon help" data-content="">
+										<i class="question circle icon"></i>
+									</span></label>
+									<input type="password"/>
+								</div>
+							</div>
+						</div>
+
+						<div class="subcontrol title">
+							<table class="wide"><tr>
+								<td><i class="dropdown icon"></i> Online Vendor Documentation</td>
+								<td align="right"><div class="ui fitted toggle checkbox control">
+									<input type="checkbox" name="Atlas_Thing.Thing_Attachment.Vendor_OnlineDocumentation.Enabled"/>
+									<label></label>
+								</div></td>
+							</tr></table>
+						</div>
+						<div class="content">
+							<div class="field">
+								<label>URI <span class="ui icon help" data-content="">
+									<i class="question circle icon"></i>
+								</span></label>
+								<input type="text" name="Atlas_Thing.Thing_Attachment.Vendor_OnlineDocumentation.URI"/>
+							</div>
+						</div>
+					</div>
+				</div>
+
+				<!--------------------------------------------------------------------------------------------------->
+				<!-----------------------------------------HELP section---------------------------------------------->
+				<!--------------------------------------------------------------------------------------------------->
+
+				<div class="ui bottom attached tab segment delegate" data-tab="help">
+
+					<h4  class="ui header center"><i>What is an IoT-DDL?</i></h4>
+					<p>
+					IoT-DDL is an XML-based human- and machine-readable configuration scheme to describe a thing in IoT in terms of inner components, identity,
+					capabilities, resources, attachments and services. The IoT-DDL also describes the knowledge (social bonds and relationships)
+					injected or acquired by the thing, as well as the different interactions that engage the thing with cloud platforms,
+					edges, users (e.g., end-user, developer) and space-mates (nearby things or remote ones).
+					</p>
+
+					<br>
+					<br>
+
+					<hr width=”50%”>
+					<h4  class="ui header center"><i>What is a thing? and Why do you need to develop an IoT-DDL for your thing?</i></h4>
+					<p>
+					A thing in an IoT ecosystem, as illustrated in the figure below, is a composition of a set of resources, entities, services, and attachments that work together to provide various interactions and are defined through a set of attributes and properties that influence essential internal services.
+					A thing’s resources describe the shared components that a thing requires to be part of the IoT (e.g., network module, memory unit).
+					A thing’s entities define the different hardware and software components that allow a smart space and its things to interact with it.
+					These individual interactions are represented as services, functions with well-defined interfaces (APIs) that can be utilized by users or other things.
+					A thing may also offer additional interactions through external attachments, or cloud-based resources that offer additional services (e.g., log server, database, dashboard).
+					Such configuration schemes are created by the thing vendor or owner and this then gets uploaded to the thing to enable the thing to self-discover its own power and engage with the surrounding IoT ecosystem.
+
+						<div class="field">
+							<img src="https://raw.githubusercontent.com/AtlasFramework/IoT-DDL/master/Resources/ThingTaxnomy.jpg" style="width:50%; height:50%">
+						</div>
+
+					</p>
+
+					<br>
+					<br>
+
+					<hr width=”50%”>
+					<h4  class="ui header center"><i>What are the steps of building such IoT-DDL?</i></h4>
+					<p>
+					Five steps to build an Atlas_IoT-DDL.xml for your thing to be an Atlas thing
+					</p>
+
+					<h5  class="ui header center"><i><b><u>Step1:</u></b></i></h5>
+					Under the "Descriptive Metadata" section, you can provide general information regarding your thing (e.g., name, description, vendor) along with information about the smart space that will accommodate your new smart thing (e.g., Living room, Bedroom).
+					Through this section, you can also provide the environmental/physical constraints your thing may need from the smart space for a safe operation (e.g., the minimum and maximum temperature of the smart space to accommodate your thing.
+						<div class="field">
+							<img src="https://raw.githubusercontent.com/AtlasFramework/IoT-DDL/master/Resources/DescriptiveMetadata.jpg" style="width:100%; height:100%">
+						</div>
+
+					<br>
+					<br>
+					<h5  class="ui header center"><i><b><u>Step2:</u></b></i></h5>
+					Under the "Structural and Administrative Metadata" section, you can provide information regarding the network module (e.g., wifi, bluetooth) along with the communication protocol (e.g., REST HTTP) that will allow your smart thing will use to communicate with other things.
+					Through this section, you can also provide information about the device management you would like to use to monitor your thing remotely and the different interoperability settings for your thing to communicate with other smart things that use different communication languages.
+						<div class="field">
+							<img src="https://raw.githubusercontent.com/AtlasFramework/IoT-DDL/master/Resources/AdministrativeMetadata.jpg" style="width:100%; height:100%">
+						</div>
+
+					<br>
+					<br>
+					<h5  class="ui header center"><i><b><u>Step3:</u></b></i></h5>
+					Under the "Entity, Services, and Relationships" section, you can define the different individual entities within your thing, along with the different services, unbounded services (virtual services), and relationships.
+						<div class="field">
+							<img src="https://raw.githubusercontent.com/AtlasFramework/IoT-DDL/master/Resources/EntitiesTab.jpg" style="width:100%; height:100%">
+						</div>
+
+						<p>What is difference between an entity and a thing?</p>
+						<div class="two fields">
+							<div class="field">
+								<img src="https://raw.githubusercontent.com/AtlasFramework/IoT-DDL/master/Resources/Entity1.gif" style="width:100%; height:100%">
+							</div>
+							<div class="field">
+								<img src="https://raw.githubusercontent.com/AtlasFramework/IoT-DDL/master/Resources/Entity2.jpg" style="width:100%; height:100%">
+							</div>
+						</div>
+
+						<p>What is difference between a service offered by an entity, and a relationship?</p>
+						<div class="two fields">
+							<div class="field">
+								<img src="https://raw.githubusercontent.com/AtlasFramework/IoT-DDL/master/Resources/Services.jpg" style="width:100%; height:100%">
+							</div>
+							<div class="field">
+								<img src="https://raw.githubusercontent.com/AtlasFramework/IoT-DDL/master/Resources/relationship.gif" style="width:100%; height:100%">
+							</div>
+						</div>
+
+					<br>
+					<br>
+					<h5  class="ui header center"><i><b><u>Step4:</u></b></i></h5>
+					Under the "Attachments" section, you can define the external attachments, or cloud-based resources that offer additional services (e.g., log server, database, dashboard) to your smart thing.
+						<div class="field">
+							<img src="https://raw.githubusercontent.com/AtlasFramework/IoT-DDL/master/Resources/Attachments.jpg" style="width:100%; height:100%">
+						</div>
+
+					<br>
+					<br>
+					<h5  class="ui header center"><i><b><u>Step5:</u></b></i></h5>
+					After you finish providing informaiton about your thing, the last step is to generate the IoT-DDL file.
+					Click on the "Generate" blue button placed at the bottom of the page, this will guide you to another dialog box to confirm the download.
+						<div class="field">
+							<img src="https://raw.githubusercontent.com/AtlasFramework/IoT-DDL/master/Resources/download.jpg" style="width:20%; height:30%">
+						</div>
+				</div>
+			</div>
+
+			<div class="ui container">
+				<div class="wide ui primary submit button">Generate</div>
+			</div>
+		</form>
+
+		<div class="ui basic modal" id="download-modal">
+			<div class="ui icon header">
+				<i class="download icon"></i>
+				Download your IoT-DDL
+			</div>
+
+			<div class="center actions">
+				<div class="ui grey basic cancel inverted button">
+					Cancel
+				</div>
+				<a id="download-button" target="_blank"><div class="ui green ok inverted button">
+					<i class="arrow alternate circle down outline icon"></i>
+					Download
+				</div></a>
+			</div>
+		</div>
+
+		<!--------------------------------------------------------------------------------------------------->
+		<!-----------------------------------------Entities of Atlas thing----------------------------------->
+		<!--------------------------------------------------------------------------------------------------->
+
+		<div id="templates">
+			<div class="title" id="section-title">
+				<table class="wide"><tr>
+					<td>
+						<i class="dropdown icon"></i>
+						<span></span>
+					</td>
+					<td align="right"><i class="ui remove-section red close icon"></i></td>
+				</tr></table>
+			</div>
+
+			<div class="content delegate" id="entity">
+				<h4 class="ui dividing header">Entity information</h4>
+
+				<div class="two fields">
+					<div class="field required">
+						<label>ID <span class="ui icon help" data-content="A unique identifier for this entity within your thing; a combination of characters and digits (e.g., E_Sensor23).">
+							<i class="question circle icon"></i>
+						</span></label>
+						<input type="text" name="Atlas_Entities.Entity_*.Descriptive_Metadata.ID" placeholder="place a unique identifier to this entity"/>
+					</div>
+					<div class="field">
+						<label>Name <span class="ui icon help" data-content="What is this entity? (e.g., sensor, actuator).">
+							<i class="question circle icon"></i>
+						</span></label>
+						<input type="text" class="name" name="Atlas_Entities.Entity_*.Descriptive_Metadata.Name" placeholder="add a short name to this entity"/>
+					</div>
+				</div>
+
+				<div class="four fields">
+					<div class="field">
+						<label>Owner <span class="ui icon help" data-content="Who is owner of this entity? (e.g., yourself, your company, your university)">
+							<i class="question circle icon"></i>
+						</span></label>
+						<input type="text" name="Atlas_Entities.Entity_*.Descriptive_Metadata.Owner" placeholder="identify who owns this entity"/>
+					</div>
+					<div class="field">
+						<label>Vendor <span class="ui icon help" data-content="Who is vendor of this entity? (e.g., Samsung, Wemo, or your are the vendor).">
+							<i class="question circle icon"></i>
+						</span></label>
+						<input type="text" name="Atlas_Entities.Entity_*.Descriptive_Metadata.Vendor" placeholder="identify the vendor of this entity"/>
+					</div>
+
+					<div class="field">
+						<label>Category <span class="ui icon help" data-content="Is it a hardware entity?, or a software one?">
+							<i class="question circle icon"></i>
+						</span></label>
+						<select class="ui fluid dropdown" name="Atlas_Entities.Entity_*.Descriptive_Metadata.Category">
+							<option value="" disabled selected>Select the category of this entity</option>
+							<option value="Software">Software (e.g., library, script)</option>
+							<option value="Hardware">Hardware (e.g., sensor, actuator)</option>
+							<option value="Hybrid">Hybrid</option>
+						</select>
+					</div>
+					<div class="field">
+						<label>Type <span class="ui icon help" data-content="From the category of this entity, what is the type?">
+							<i class="question circle icon"></i>
+						</span></label>
+						<select class="ui fluid dropdown" name="Atlas_Entities.Entity_*.Descriptive_Metadata.Type">
+							<option value="" disabled selected>Select the type of this entity</option>
+							<option>Built-In</option>
+							<option>Connected</option>
+							<option>Remote</option>
+						</select>
+					</div>
+				</div>
+
+				<div class="field">
+					<label>Description <span class="ui icon help" data-content="Provide a short description of this entity.">
+						<i class="question circle icon"></i>
+					</span></label>
+					<input type="text" name="Atlas_Entities.Entity_*.Descriptive_Metadata.Description" placeholder="add a short description on this entity"/>
+				</div>
+
+				<!-------------------------------------------------------------------------------------->
+				<!-------------------------------------------------------------------------------------->
+				<!-------------------------------------------------------------------------------------->
+
+				<br>
+				<br>
+				<h4 class="ui dividing header">Services
+						<span class="ui icon help" data-content="Define the different functionalities this entity provides to your smart space (e.g., smart lamp can turn on, turn off, and change the brightness)">
+							<i class="question circle icon"></i>
+						</span>
+				</h4>
+				<div class="fluid accordion" data-section="service">
+					<div class="fixed disabled title"><i>Currently no services are defined under this entity</i></div>
+				</div>
+				<br/>
+				<div class="ui add-section button" data-target="service">Add a Service</div>
+
+				<br>
+				<br>
+				<h4 class="ui dividing header">Unbounded Services
+						<span class="ui icon help" data-content="Define the different functionalities not offered by this entity but may be offered by other things in the smart space that your services may cooperate or compete with (e.g., your entity prepares coffee, so a nice IoT application can be built if there is an alarm clock that can trigger the coffee machine by 6am)">
+							<i class="question circle icon"></i>
+						</span>
+				</h4>
+				<div class="fluid accordion" data-section="unbounded">
+					<div class="fixed disabled title"><i>Currently no unbounded services are defined under this entity</i></div>
+				</div>
+				<br/>
+				<div class="ui add-section button" data-target="unbounded">Add an Unbounded Service</div>
+
+				<br>
+				<br>
+				<h4 class="ui dividing header">Relationships
+						<span class="ui icon help" data-content="Define the different functional links and relationships between different services and unbounded services (e.g., alarm clock can trigger the coffee machine to prepare morning coffee)">
+							<i class="question circle icon"></i>
+						</span>
+				</h4>
+				<div class="fluid accordion" data-section="relationship">
+					<div class="fixed disabled title"><i>Currently no relationships are defined under this entity</i></div>
+				</div>
+				<br/>
+				<div class="ui add-section button" data-target="relationship">Add a Relationship</div>
+			</div>
+
+			<!-------------------------------------------------------------------------------------->
+			<!-------------------------------------------------------------------------------------->
+			<!-------------------------------------------------------------------------------------->
+
+			<div class="content delegate" style="background-color: #f4fafc;" id="service">
+				<h4 class="ui dividing header">Service information</h4>
+
+				<div class="field">
+					<label>Name <span class="ui icon help" data-content="What can be a short and descriptive name for this service for you and others (e.g., things in the smart space) to trigger such functionalities? (e.g., turn on light, read current room temperature)">
+						<i class="question circle icon"></i>
+					</span></label>
+					<input type="text" class="name" name="Atlas_Entities.Entity_*.Services.Service_*.Name" placeholder="add a descriptive name on this service"/>
+				</div>
+				<div class="two fields">
+					<div class="field">
+						<label>Category <span class="ui icon help" data-content="Will this service be used in Entertainment kind of IoT applications? or Health ones?">
+							<i class="question circle icon"></i>
+						</span></label>
+						<select class="ui fluid dropdown" name="Atlas_Entities.Entity_*.Services.Service_*.AppCategory">
+								<option value="" disabled selected>Select a category that describes the function of this service</option>
+								<option>Ambiance</option>
+								<option>Automation</option>
+								<option>Wellness</option>
+								<option>Lighting</option>
+								<option>Health</option>
+								<option>Personal Assistance</option>
+								<option>Safety</option>
+								<option>Entertainment</option>
+								<option>Environment Monitor</option>
+								<option>Time Alarms</option>
+								<option>Hygiene</option>
+								<option>Eating</option>
+								<option>Cleaning</option>
+								<option>Office</option>
+						</select>
+					</div>
+					<div class="field">
+						<label>Type <span class="ui icon help" data-content="What is the type of this service? (e.g., does it report data, or perform an action)">
+							<i class="question circle icon"></i>
+						</span></label>
+						<select class="ui fluid dropdown" name="Atlas_Entities.Entity_*.Services.Service_*.Type">
+							<option value="" disabled selected>Select the functionality type offered by this service</option>
+							<option value="Action">Action (e.g., turn on electric switch)</option>
+							<option value="Report">Report (e.g., read temperature sensor)</option>
+							<option value="Condition">Condition (e.g., check the availability of a parking spot)</option>
+						</select>
+					</div>
+				</div>
+
+				<div class="field">
+					<label>Keywords <span class="ui icon help" data-content="A set of keywords describing the offered functionality and the nature of an IoT application that can use this service (e.g., for a coffee machine service: morning, breakfast, energy, work)">
+						<i class="question circle icon"></i>
+						</span></label>
+					<!--<input type="text" name="Atlas_Thing.Atlas_EntitiesAtlas_Entities.Entity_*.Services.Service_*.Keywords" placeholder="place a set of keywords (separated by commas) describing the functionality and nature of the service "></select>-->
+					<div multiple="" class="ui fluid fluid multiple search selection dropdown">
+						<input type="hidden" name="Atlas_Entities.Entity_*.Services.Service_*.Keywords">
+						<div class="default text">Place a set of keywords (separated by commas) describing the functionality and nature of the service</div>
+					</div>
+				</div>
+
+				<div class="field">
+					<label>Description <span class="ui icon help" data-content="How can you describe the functionality offered by this service?">
+						<i class="question circle icon"></i>
+						</span></label>
+					<input type="text" name="Atlas_Entities.Entity_*.Services.Service_*.Description" placeholder="add a short description on the offered service"/>
+				</div>
+
+				<br>
+				<h4  class="ui header center"><i>A constraint represents a precondition to the behavior of the service to avoid harmful use of the service and to avoid introducing unsafe state for the smart space</i></h4>
+				<h4  class="ui header center"><i>use the following dialog to place the different contextual and temporal constraint on this service</i></h4>
+				<br>
+
+				<h4 class="ui dividing header">Contextual Constraints<span class="ui icon help" data-content="Ignoring safety puts the operation of the service and thing in danger of improper or harmful use and the smart space in unsafe state.(e.g., an automatic door opener with a strike-push mechanism getting invoked 50,000 times per second due to a bug in the program.)">
+					<i class="question circle icon"></i>
+				</span></h4>
+
+				<div class="field">
+					<label>Time Window<span class="ui icon help" data-content="the safe time (in seconds) that separates consecutive calls to the offered service, this window represents how long (in seconds) does the service take to complete the task">
+						<i class="question circle icon"></i>
+					</span></label>
+					<input type="text" name="Atlas_Entities.Entity_*.Services.Service_*.Contextual_Constraints.Time_Window" value="30seconds"/>
+				</div>
+
+				<div class="two fields">
+					<div class="field">
+						<label>Usage Mode<span class="ui icon help" data-content="Can this service be engaged in multiple applications at the same time?">
+							<i class="question circle icon"></i>
+						</span></label>
+						<select class="ui fluid dropdown" name="Atlas_Entities.Entity_*.Services.Service_*.Contextual_Constraints.Usage_Mode">
+								<option value="" disabled selected>Select a usage mode of this service</option>
+								<option value="Single">Single (service can be engaged in single-application)</option>
+								<option value="Multiple">Multiple (this service can be engaged in multiple-applications)</option>
+						</select>
+					</div>
+					<div class="field">
+						<label>Concurrent<span class="ui icon help" data-content="Does this service allow concurrent call, even from a single application?">
+							<i class="question circle icon"></i>
+						</span></label>
+						<select class="ui fluid dropdown" name="Atlas_Entities.Entity_*.Services.Service_*.Contextual_Constraints.Concurrent"/>
+								<option value="" disabled selected>Select the concurrency mode</option>
+								<option value="No">No (this service allows single call within the time window)</option>
+								<option value="Yes">Yes (this service allows concurrent calls even from single/multiple mode)</option>
+						</select>
+					</div>
+				</div>
+
+				<h4 class="ui dividing header">Temporal Constraints <span class="ui icon help" data-content="Temporal constraints deal with the acceptable time interval(s) for the work of this service and the acceptable time interval(s) to allow user trigger for the offered service (e.g., a user can start the microwave any time between 8:00am and 10:00pm, otherwise the device must remain off).">
+					<i class="question circle icon"></i>
+				</span></h4>
+
+				<div class="field">
+					<table class="ui compact white definition table">
+						<thead>
+							<th></th>
+							<th>Start Time</th>
+							<th>End Time</th>
+						</thead>
+						<tbody>
+							<tr>
+								<td>Working <span class="ui icon help" data-content="the acceptable time window for the work of this service (including the regular work time as well as the maintanince time)">
+									<i class="question circle icon"></i>
+								</span></td>
+								<td><input type="text" name="Atlas_Entities.Entity_*.Services.Service_*.Temporal_Constraints.Working.StartTime" value="6am"/></td>
+								<td><input type="text" name="Atlas_Entities.Entity_*.Services.Service_*.Temporal_Constraints.Working.EndTime" value="10pm"/></td>
+							</tr>
+							<tr>
+								<td>Callable <span class="ui icon help" data-content="the acceptable time window during which a user can trigger an API (e.g., user cannot trigger a call from 7pm to 7:30pm because of the periodic maintenance)">
+									<i class="question circle icon"></i>
+								</span></td>
+								<td><input type="text" name="Atlas_Entities.Entity_*.Services.Service_*.Temporal_Constraints.Callable.StartTime" value="6:30am"/></td>
+								<td><input type="text" name="Atlas_Entities.Entity_*.Services.Service_*.Temporal_Constraints.Callable.EndTime" value="9:30pm"/></td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+
+				<br>
+				<h4  class="ui header center"><i>use the following dialog to build the functionality of this service in terms of defining the required inputs, expected output, and developing the C/C++-based code from ready available APIs</i></h4>
+				<br>
+
+				<h4 class="ui dividing header">Libraries <span class="ui icon help" data-content="specify any C libraries needed for your service, such as GPIO libraries (e.g., wiringPi.h, pigpio.h) or any other C libraries your code will use during execution">
+					<i class="question circle icon"></i>
+				</span></h4>
+				
+				<table class="ui white table library">
+					<thead>
+						<th class="one wide"><i class="ui add-library-row icon add" data-target="library-row"></i></th>
+						<th class="fifteen wide">Lib</th>
+					</thead>
+					
+					<tbody><tr class="fixed">
+						<td class="center" colspan="2">
+						<i>This Service takes no Library. Click the plus to define a Library.</i>
+						</td>
+					</tbody>
+				</table>
+
+				<h4 class="ui dividing header">Service Inputs <span class="ui icon help" data-content="define the inputs (if any) required for the operation of this service (e.g., turn on light by certain time, so time is an input that should be provided in the call)">
+					<i class="question circle icon"></i>
+				</span></h4>
+
+				<table class="ui white table inputs">
+					<thead>
+						<th class="one wide"><i class="ui add-row icon add" data-target="input-row"></i></th>
+						<th class="eight wide">Name <span class="ui icon help" data-content="provide short description of the input (e.g., turn on light by certain time, so time is an input that should be provided in the call)">
+							<i class="question circle icon"></i>
+						</span></th>
+						<th class="seven wide">Type <span class="ui icon help" data-content="provide the data type of the input">
+							<i class="question circle icon"></i>
+						</span></th>
+					</thead>
+
+					<tbody><tr class="fixed">
+						<td class="center" colspan="3">
+							<i>This Service takes no input ("void"). Click the plus to define an input.</i>
+						</td>
+					</tr></tbody>
+				</table>
+
+				<h4 class="ui dividing header">Service Output <span class="ui icon help" data-content="define the expected output from running this service (e.g., temperature sensor returns the current room temperature in C)">
+					<i class="question circle icon"></i>
+				</span></h4>
+
+				<div class="two fields">
+
+					<div class="field">
+						<label>Name <span class="ui icon help" data-content="provide short description of the output (e.g., the returned value from the temperature sensor is Celsius)"">
+							<i class="question circle icon"></i>
+						</span></label>
+						<input type="text" name="Atlas_Entities.Entity_*.Services.Service_*.OutputDescription"/>
+					</div>
+
+					<div class="field">
+						<label>Data Type <span class="ui icon help" data-content="provide the data type of the output">
+							<i class="question circle icon"></i>
+						</span></label>
+						<select class="ui fluid dropdown" name="Atlas_Entities.Entity_*.Services.Service_*.OutputType">
+							<option value="void">void (nothing)</option>
+							<option value="int">Integer (non decimal number)</option>
+							<option value="float" disabled>Floating point (decimal number)</option>
+							<option value="const char*" disabled>String (set of characters and digits)</option>
+							<option value="bool" disabled>Boolean (True or False)</option>
+						</select>
+					</div>
+
+				</div>
+
+				<h4 class="ui dividing header">Functionality <span class="ui icon help" data-content="use the window below to develop the C/C++ functionality of this service">
+					<i class="question circle icon"></i>
+				</span></h4>
+
+				<div class="functionality">
+					<div class="field">
+<!-- Keep this unindented to prevent the idents from showing up in the textarea. -->
+<textarea class="editor" name="Atlas_Entities.Entity_*.Services.Service_*.Service_Formula">
+// ~ Service body C/C++ code block ~
+// You can use the inputs you defined above by name
+// Any return values should match the specified output type
+
+</textarea>
+					</div>
+
+					<div class="ui horizontal divider">you can also use the general platform-free APIs below to develop your code</div>
+
+					<div class="two fields">
+						<div class="field">
+							<label>General platform-free APIs<span class="ui icon help" data-content="use the drop menu below to select a general (platform-free) API, adjust the characteristics (e.g., inputs) that will be shown below on selection if required, then click add this API button to add it to your C/C++ code above">
+								<i class="question circle icon"></i>
+							</span></label>
+							<select class="update-statement ui fluid dropdown">
+								<option value="" disabled selected>Select an API</option>
+								<option value="print_value">Print Value</option>
+								<option value="print_string">Print String</option>
+								<option value="DigitalWrite_High">Write Digital high (5 Volt)</option>
+								<option value="DigitalWrite_Low">Write Digital Low (0 Volt)</option>
+								<option value="Delay">Delay in milliseconds</option>
+								<option value="DigitalWrite_Blink">Blink digital Pin with delay</option>
+								<option value="AnalogWrite">Write analog value to an analog pin</option>
+								<option value="DigitalRead">Read the value from digital pin</option>
+								<option value="AnalogRead">Read the value from analog pin</option>
+							</select>
+						</div>
+						<div class="field">
+							<label>&#160</label>
+							<div class="wide ui add-statement button">Add this API to your code</div>
+						</div>
+					</div>
+
+					<div class="statements">
+						<div class="field" data-statement="print_value">
+							<input id="print-value" type="text" placeholder="value or variable to Print"/>
+						</div>
+
+						<div class="field" data-statement="print_string">
+							<input id="print-string" type="text" placeholder="String to Print"/>
+						</div>
+
+						<div class="field" data-statement="DigitalWrite_High">
+							<input id="digitalwrite_high-pin" type="text" placeholder="GPIO Pin"/>
+						</div>
+
+						<div class="field" data-statement="DigitalWrite_Low">
+							<input id="digitalwrite_low-pin" type="text" placeholder="GPIO Pin"/>
+						</div>
+
+						<div class="field" data-statement="Delay">
+							<input id="Delay-value" type="text" placeholder="milliseconds"/>
+						</div>
+
+						<div class="field" data-statement="DigitalRead">
+							<input id="DigitalRead-pin" type="text" placeholder="GPIO Pin"/>
+						</div>
+
+						<div class="field" data-statement="AnalogRead">
+							<input id="AnalogRead-pin" type="text" placeholder="GPIO Pin"/>
+						</div>
+
+						<div class="two fields" data-statement="DigitalWrite_Blink">
+							<div class="field">
+								<input id="DigitalWrite_Blink-pin" type="text" placeholder="GPIO Pin"/>
+							</div>
+							<div class="field">
+								<input id="DigitalWrite_Blink-delayValue" type="text" placeholder="Delay Value in milliseconds"/>
+							</div>
+						</div>
+
+						<div class="two fields" data-statement="AnalogWrite">
+							<div class="field">
+								<input id="AnalogWrite-pin" type="text" placeholder="GPIO Pin"/>
+							</div>
+							<div class="field">
+								<input id="AnalogWrite-Value" type="text" placeholder="Analog value"/>
+							</div>
+						</div>
+
+					</div>
+				</div>
+			</div>
+
+			<table id="input-row">
+				<tbody><tr>
+					<td>
+						<i class="ui remove-row red icon close"></i> <i class="ui move-row blue icon sort"></i>
+					</td>
+					<td>
+						<div class="field"><input type="text" name="Atlas_Entities.Entity_*.Services.Service_*.Inputs.Input_*.Input_Description"></div>
+					</td>
+					<td>
+						<div class="field"><select class="ui fluid dropdown" name="Atlas_Entities.Entity_*.Services.Service_*.Inputs.Input_*.Input_Type">
+							<option value="" disabled selected>Select the type of the input</option>
+							<option value="int">Integer (non decimal number)</option>
+							<option value="float" disabled>Floating point (decimal number)</option>
+							<option value="const char*" disabled>String (set of characters and digits)</option>
+							<option value="bool" disabled>Boolean (True or False)</option>
+						</select></div>
+					</td>
+				</tr></tbody>
+			</table>
+
+			<table id="library-row">
+				<tbody><tr>
+					<td>
+					<i class="ui remove-library-row red icon close"></i> <i class="ui move-row blue icon sort"></i>
+					</td>
+					<td>
+					<div class="field"><input type="text" name="Atlas_Entities.Entity_*.Services.Service_*.Library.Lib_*"></div>
+					</td>
+				</tr></tbody>
+			</table>
+
+			<div class="content delegate" style="background-color: #fff9f9" id="unbounded">
+				<h4 class="ui dividing header">Unbounded service information
+						<span class="ui icon help" data-content="Define a virtual functionality not offered by this entity but may be offered by other things in the smart space that your services may cooperate or compete with (e.g., your entity prepares coffee, so a nice IoT application can be built if there is an alarm clock that can trigger the coffee machine by 6am)">
+							<i class="question circle icon"></i>
+						</span>
+				</h4>
+
+				<div class="two fields">
+					<div class="field">
+						<label>Name <span class="ui icon help" data-content="What can be a short and descriptive name for this virtual service">
+							<i class="question circle icon"></i>
+						</span></label>
+						<input type="text" class="name" name="Atlas_Entities.Entity_*.UnboundedService.UB_*.Name" placeholder="add a descriptive name on this virtual service"/>
+					</div>
+
+					<div>
+						<label>Description <span class="ui icon help" data-content="Provide a description for this virtual service.">
+							<i class="question circle icon"></i>
+						</span></label>
+						<input type="text" name="Atlas_Entities.Entity_*.UnboundedService.UB_*.Description"   placeholder="add a description on this virtual service."/>
+					</div>
+				</div>
+
+				<h4 class="ui dividing header">Matching Parameters <span class="ui icon help" data-content="for your smart thing to find a match between this virtual service and other services offered by smart things in your smart space, complete the attributes below to guide such match operation">
+					<i class="question circle icon"></i>
+				</span></h4>
+
+				<div class="three fields">
+					<div class="field">
+						<label>Type <span class="ui icon help" data-content="What is the type of this virtual service? (e.g., does it report data, or perform an action)">
+							<i class="question circle icon"></i>
+						</span></label>
+						<select class="ui fluid dropdown" name="Atlas_Entities.Entity_*.UnboundedService.UB_*.MatchType">
+							<option value="" disabled selected>Select the functionality type of this service</option>
+							<option value="Action">Action (e.g., turn on electric switch)</option>
+							<option value="Report">Report (e.g., read temperature sensor)</option>
+							<option value="Condition">Condition (e.g., check the availability of a parking spot)</option>
+						</select>
+					</div>
+					<div class="field">
+						<label>Vendors <span class="ui icon help" data-content="Who can be the vendors (comma separated) of this virtual service? (e.g., Samsung, Wemo).">
+							<i class="question circle icon"></i>
+						</span></label>
+						<div multiple="" class="ui fluid fluid multiple search selection dropdown">
+							<input type="hidden" name="Atlas_Entities.Entity_*.UnboundedService.UB_*.MatchVendor">
+							<div class="default text">Identify the vendor of this virtual entity</div>
+						</div>
+					</div>
+					<div class="field">
+						<label>Keywords <span class="ui icon help" data-content="A set of keywords describing the nature and functionality of this virtual service">
+							<i class="question circle icon"></i>
+						</span></label>
+						<div multiple="" class="ui fluid fluid multiple search selection dropdown">
+							<input type="hidden" name="Atlas_Entities.Entity_*.UnboundedService.UB_*.MatchKeywords">
+							<div class="default text">Place a set of keywords (separated by commas) describing the functionality and nature of this virtual service</div>
+						</div>
+					</div>
+				</div>
+
+				<div class="field">
+						<label>Match Value <span class="ui icon help" data-content="for your smart thing to find a match between this virtual service and other services offered by smart things in your smart space, the match value represents the minimum percentage of match in parameters between this virtual service and another offered service, to be considered as a match and perform the replacement">
+							<i class="question circle icon"></i>
+						</span></label>
+						<input type="text" name="Atlas_Entities.Entity_*.UnboundedService.UB_*.MatchValue" value="70%"/>
+				</div>
+
+			</div>
+
+			<div class="content delegate" style="background-color: #f3ffea" id="relationship">
+				<h4 class="ui dividing header">Relationship information <span class="ui icon help" data-content="Define the different functional links and relationships between different services and unbounded services (e.g., alarm clock can trigger the coffee machine to prepare morning coffee)">
+							<i class="question circle icon"></i>
+						</span>
+				</h4>
+
+				<div class="fields">
+					<div class="four wide field">
+						<label>Name <span class="ui icon help" data-content="Provide a descriptive name to this relationship">
+							<i class="question circle icon"></i>
+						</span></label>
+						<input type="text" class="name" name="Atlas_Entities.Entity_*.Relationships.Relationship_*.Name" placeholder="short and descriptive name to this relationship"/>
+					</div>
+					<div class="four wide field">
+						<label>Establisher <span class="ui icon help" data-content="Mention who established this relationship (e.g., Samsung, Wemo, yourself)">
+							<i class="question circle icon"></i>
+						</span></label>
+						<input type="text" name="Atlas_Entities.Entity_*.Relationships.Relationship_*.Establisher" placeholder="who is establishing this relationship"/>
+					</div>
+					<div class="eight wide field">
+						<label>Description <span class="ui icon help" data-content="Add a short description to this relationship">
+							<i class="question circle icon"></i>
+						</span></label>
+						<input type="text" name="Atlas_Entities.Entity_*.Relationships.Relationship_*.Description" placeholder="a short description on this relationship"/>
+					</div>
+				</div>
+
+				<h4 class="ui dividing header">Behavior <span class="ui icon help" data-content="mention the behavior of this relationshp usig one of the following relationship types (e.g., alarm clock controls the coffee machine to prepare morning coffee, turning on the oven interferes with closing alarm clock)">
+					<i class="question circle icon"></i>
+				</span></h4>
+
+				<div class="behavior three fields">
+					<div class="kind field">
+						<label>Relationship Type</label>
+						<select class="update-relationship ui fluid dropdown" name="Atlas_Entities.Entity_*.Relationships.Relationship_*.type">
+							<option value="" disabled selected>Select the type of the relationship</option>
+							<option value="control">Control</option>
+							<option value="drive">Drive</option>
+							<option value="support">Support</option>
+							<option value="extend">Extend</option>
+							<option value="contest">Contest</option>
+							<option value="interfere">Interfere</option>
+						</select>
+					</div>
+
+					<div class="this field">
+						<label data-kind="">First Service</label>
+						<label data-kind="control">IF</label>
+						<label data-kind="drive">USE</label>
+						<label data-kind="support">BEFORE</label>
+						<label data-kind="extend">DO</label>
+						<label data-kind="contest">PREFER USING</label>
+						<label data-kind="interfere">DO NOT DO</label>
+
+						<select class="ui fluid dropdown" name="Atlas_Entities.Entity_*.Relationships.Relationship_*.Input1">
+							<option value="">select a service/unbounded service</option>
+						</select>
+					</div>
+					<div class="that field">
+						<label data-kind="">Second Service</label>
+						<label data-kind="control">THEN</label>
+						<label data-kind="drive">TO DO</label>
+						<label data-kind="support">CHECK ON</label>
+						<label data-kind="extend">WHILE DOING</label>
+						<label data-kind="contest">OVER</label>
+						<label data-kind="interfere">IF DOING</label>
+
+						<select class="ui fluid dropdown" name="Atlas_Entities.Entity_*.Relationships.Relationship_*.Input2">
+							<option value="">select a service/unbounded service</option>
+						</select>
+					</div>
+				</div>
+
+			<table id="service-row">
+				<tbody><tr class="choose">
+					<td></td>
+				</tr></tbody>
+			</table>
+		</div>
+	</body>
+</html>
