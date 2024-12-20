@@ -7,7 +7,11 @@
 #include <csignal>
 #include <cppmicroservices/BundleActivator.h>
 extern "C" {
-#include <wiringPi.h>
+[+ IF (exist? "library") +]
+[+ FOR library +]
+#include "[+ (get "name") +]"
+[+ ENDFOR +]
+[+ ENDIF +]
 }
 
 #include <service/Service.cpp>

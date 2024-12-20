@@ -109,10 +109,10 @@ void API_Generator::Generate_ServicesBundles(){
 	for(int j=1;j<=num_Entities;j++){
 
 		int num_services = 1; 
-	    	string num_of_services = DDLM.parseXMLTag("Atlas_IoTDDL","Atlas_Entities","Entity_"+std::to_string(j),"Services","Number_Services");
-	    	num_services =  atoi(num_of_services.c_str());
+		string num_of_services = DDLM.parseXMLTag("Atlas_IoTDDL","Atlas_Entities","Entity_"+std::to_string(j),"Services","Number_Services");
+		num_services =  atoi(num_of_services.c_str());
 	    
-	    	for(int i=1;i<=num_services;i++){
+		for(int i=1;i<=num_services;i++){
 
 			int Service_Number = i;
 			cout<<"Parsing Information of Service #"<<i<<" under entity #"<<j<<endl;
@@ -130,6 +130,15 @@ void API_Generator::Generate_ServicesBundles(){
 			      Service_InputTypes        = DDLM.parseXMLTag("Atlas_IoTDDL","Atlas_Entities","Entity_"+std::to_string(j),"Services","Service_"+std::to_string(i),"Service_InputTypes");
 			      Service_InputDescription  = DDLM.parseXMLTag("Atlas_IoTDDL","Atlas_Entities","Entity_"+std::to_string(j),"Services","Service_"+std::to_string(i),"Service_InputDescriptions");
 			      //Service_InputRange        = DDLM.parseXMLTag("Atlas_IoTDDL","Atlas_Entities","Entity_"+std::to_string(j),"Services","Service_"+std::to_string(i),"Service_InputRange");
+			}
+
+			//Libraries
+			string Service_Libraries = "NULL";
+			int num_Libraries = 0;
+			string num_of_Libraries = DDLM.parseXMLTag("Atlas_IoTDDL","Atlas_Entities","Entity_"+std::to_string(j),"Services","Service_"+std::to_string(i),"Library_Number");
+			num_Libraries = atoi(num_of_Libraries.c_str());
+			if(num_Libraries > 0){
+				Service_Libraries = DDLM.parseXMLTag("Atlas_IoTDDL","Atlas_Entities","Entity_"+std::to_string(j),"Services","Service_"+std::to_string(i),"Libraries");
 			}
 
 			//Output
@@ -401,6 +410,15 @@ void API_Generator::Generate_ServicesBundles(){
 
 			}
 
+			// Handle Libraries
+			if(Service_Libraries.compare("NULL") != 0){
+				istringstream libs(Service_Libraries);
+				string lib;
+				while(getline(libs, lib, ',')) {
+					// def << "library = " << "#include <" << lib << ">" << ";" << std::endl;
+					def << "library = { name = \"" << lib << "\"; };" << std::endl;
+				}
+			}
 
 			if(Service_OutputTypes == "void") {
 				def << "output = { type = void; };" << std::endl;
