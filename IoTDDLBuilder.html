@@ -41,7 +41,7 @@
 			let dataset  = { element: null, args: null };
 			let sections = {
 				entity:       { nextId: 1, elements: {} },
-				service:      { nextId: 1, elements: {}, sorters: {} },
+				service:      { nextId: 1, elements: {}, sorters: {}, librarySorters: {} }, // Add librarySorters
 				unbounded:    { nextId: 1, elements: {} },
 				relationship: { nextId: 1, elements: {}, sorters: {} }
 			};
@@ -109,6 +109,13 @@
 				let params = { animation: 150, filter: '.fixed' };
 
 				sections.service.sorters[sid] = Sortable.create(table[0], params);
+			}
+
+			let setupLibraryRows = function (sid) {
+				let table = sections.service.elements[sid].find('table.library > tbody');
+				let params = { animation: 150, filter: '.fixed' };
+				
+				sections.service.librarySorters[sid] = Sortable.create(table[0], params);
 			}
 
 			let addToServiceChooser = function(r, e) {
@@ -308,6 +315,7 @@
 					switch (type) {
 						case 'service':
 							setupInputRows(id);
+							setupLibraryRows(id);
 							content.find('.update-statement').change()
 							refreshServiceChoosers(content, 'add');
 							break;
