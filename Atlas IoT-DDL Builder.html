@@ -113,6 +113,19 @@
 				sections.service.sorters[sid] = Sortable.create(table[0], params);
 			}
 
+			// First, add setupADCRows function
+			let setupADCRows = function (sid) {
+				let table = sections.service.elements[sid].find('table.adc > tbody');
+				let params = { animation: 150, filter: '.fixed' };
+				
+				// Initialize all dropdowns in the table
+				table.find('.ui.dropdown').dropdown();
+				
+				sections.service.adcSorters = sections.service.adcSorters || {};
+				sections.service.adcSorters[sid] = Sortable.create(table[0], params);
+			};
+									
+
 			let setupLibraryRows = function (sid) {
 				let table = sections.service.elements[sid].find('table.library > tbody');
 				let params = { animation: 150, filter: '.fixed' };
@@ -324,6 +337,41 @@
 				}
 			};
 
+			
+			// Modify repairADC function for XML generation
+			let repairADC = function(obj) {
+				let es = obj['Atlas_Entities'];
+				for (let e in es) {
+					let ss = es[e]['Services'];
+					for (let s in ss) {
+						// Store all existing service properties
+						let serviceProps = {...ss[s]};
+						
+						// Clear the service object
+						for (let prop in ss[s]) {
+							delete ss[s][prop];
+						}
+						
+						// First add all properties before ADC
+						for (let prop in serviceProps) {
+							if (prop !== 'ADC' && prop !== 'ADC_Number') {
+								ss[s][prop] = serviceProps[prop];
+							}
+						}
+						
+						// Then add ADC_Number and ADC consecutively
+						let adcs = serviceProps['ADC'];
+						if (!adcs) {
+							ss[s]['ADC_Number'] = 0;
+						} else {
+							let adcCount = Object.keys(adcs).length;
+							ss[s]['ADC_Number'] = adcCount;
+							ss[s]['ADC'] = adcs;
+						}
+					}
+				}
+			};
+
 			let repairLibraries = function(obj) {
 				let es = obj['Atlas_Entities'];
 				for (let e in es) {
@@ -437,6 +485,7 @@
 						case 'service':
 							setupInputRows(id);
 							setupLibraryRows(id);
+							setupADCRows(id);  // Add this line
 							content.find('.update-statement').change()
 							refreshServiceChoosers(content, 'add');
 							break;
@@ -530,6 +579,51 @@
 					row.remove();
 					updateDefault(parent);
 				});
+
+				
+				// Add validation for ADC channel input
+				$('.delegate').on('input', '.adc-channel-input', function(e) {
+					let input = $(this);
+					let adcType = input.closest('tr').find('.adc-type').val();
+					let value = parseInt(input.val());
+					
+					// Determine max channel based on ADC type
+					let maxChannel;
+					if (adcType === 'MCP3008') {
+						maxChannel = 7;  // MCP3008 has 8 channels (0-7)
+					} else if (adcType === 'ADS1115') {
+						maxChannel = 3;  // ADS1115 has 4 channels (0-3)
+					} else {
+						// If no ADC type selected, clear the channel input
+						input.val('');
+						return;
+					}
+					
+					// Validate input
+					if (isNaN(value) || value < 0 || value > maxChannel) {
+						input.val(''); // Clear invalid input
+					}
+				});
+
+				// Update the ADC type change handler
+				$('.delegate').on('change', '.adc-type', function(e) {
+					let select = $(this);
+					let channelInput = select.closest('tr').find('.adc-channel-input');
+					let adcType = select.val();
+					
+					// Clear channel input when ADC type changes
+					channelInput.val('');
+					
+					// Update the placeholder text
+					if (adcType === 'MCP3008') {
+						channelInput.attr('placeholder', 'Enter channel (0-7)');
+					} else if (adcType === 'ADS1115') {
+						channelInput.attr('placeholder', 'Enter channel (0-3)');
+					} else {
+						channelInput.attr('placeholder', 'Select ADC type first');
+					}
+				});			
+
 
 				$('.delegate').on('click', '.ui.add-library-row', function (e) {
 					let target = $(this).attr('data-target');
@@ -630,6 +724,7 @@
 						repairInputs(ddl);
 						repairAttachments(ddl);
 						repairLibraries(ddl);
+						repairADC(ddl);
 
 						let xml = toXML({ 'Atlas_IoTDDL': ddl });
 						$('#download-button').attr({
@@ -1678,6 +1773,27 @@
 					</tr></tbody>
 				</table>
 
+			<!-- ADC Configuration Table -->
+			<h4 class="ui dividing header">ADC Configuration <span class="ui icon help" data-content="Configure ADC settings for analog input readings">
+				<i class="question circle icon"></i>
+			</span></h4>
+
+			<table class="ui white table adc">
+				<thead>
+					<th class="one wide"><i class="ui add-row icon add" data-target="adc-row"></i></th>
+					<th class="six wide">ADC Type</th>
+					<th class="four wide">Channel</th>
+					<th class="five wide">Variable Name</th>
+				</thead>
+				<tbody><tr class="fixed">
+					<td class="center" colspan="4">
+						<i>No ADC configuration. Click the plus to add ADC settings.</i>
+					</td>
+				</tr></tbody>
+			</table>
+
+				
+				
 				<h4 class="ui dividing header">Service Output <span class="ui icon help" data-content="define the expected output from running this service (e.g., temperature sensor returns the current room temperature in C)">
 					<i class="question circle icon"></i>
 				</span></h4>
@@ -1721,80 +1837,7 @@
 </textarea>
 					</div>
 
-					<div class="ui horizontal divider">you can also use the general platform-free APIs below to develop your code</div>
-
-					<div class="two fields">
-						<div class="field">
-							<label>General platform-free APIs<span class="ui icon help" data-content="use the drop menu below to select a general (platform-free) API, adjust the characteristics (e.g., inputs) that will be shown below on selection if required, then click add this API button to add it to your C/C++ code above">
-								<i class="question circle icon"></i>
-							</span></label>
-							<select class="update-statement ui fluid dropdown">
-								<option value="" disabled selected>Select an API</option>
-								<option value="print_value">Print Value</option>
-								<option value="print_string">Print String</option>
-								<option value="DigitalWrite_High">Write Digital high (5 Volt)</option>
-								<option value="DigitalWrite_Low">Write Digital Low (0 Volt)</option>
-								<option value="Delay">Delay in milliseconds</option>
-								<option value="DigitalWrite_Blink">Blink digital Pin with delay</option>
-								<option value="AnalogWrite">Write analog value to an analog pin</option>
-								<option value="DigitalRead">Read the value from digital pin</option>
-								<option value="AnalogRead">Read the value from analog pin</option>
-							</select>
-						</div>
-						<div class="field">
-							<label>&#160</label>
-							<div class="wide ui add-statement button">Add this API to your code</div>
-						</div>
-					</div>
-
-					<div class="statements">
-						<div class="field" data-statement="print_value">
-							<input id="print-value" type="text" placeholder="value or variable to Print"/>
-						</div>
-
-						<div class="field" data-statement="print_string">
-							<input id="print-string" type="text" placeholder="String to Print"/>
-						</div>
-
-						<div class="field" data-statement="DigitalWrite_High">
-							<input id="digitalwrite_high-pin" type="text" placeholder="GPIO Pin"/>
-						</div>
-
-						<div class="field" data-statement="DigitalWrite_Low">
-							<input id="digitalwrite_low-pin" type="text" placeholder="GPIO Pin"/>
-						</div>
-
-						<div class="field" data-statement="Delay">
-							<input id="Delay-value" type="text" placeholder="milliseconds"/>
-						</div>
-
-						<div class="field" data-statement="DigitalRead">
-							<input id="DigitalRead-pin" type="text" placeholder="GPIO Pin"/>
-						</div>
-
-						<div class="field" data-statement="AnalogRead">
-							<input id="AnalogRead-pin" type="text" placeholder="GPIO Pin"/>
-						</div>
-
-						<div class="two fields" data-statement="DigitalWrite_Blink">
-							<div class="field">
-								<input id="DigitalWrite_Blink-pin" type="text" placeholder="GPIO Pin"/>
-							</div>
-							<div class="field">
-								<input id="DigitalWrite_Blink-delayValue" type="text" placeholder="Delay Value in milliseconds"/>
-							</div>
-						</div>
-
-						<div class="two fields" data-statement="AnalogWrite">
-							<div class="field">
-								<input id="AnalogWrite-pin" type="text" placeholder="GPIO Pin"/>
-							</div>
-							<div class="field">
-								<input id="AnalogWrite-Value" type="text" placeholder="Analog value"/>
-							</div>
-						</div>
-
-					</div>
+					
 				</div>
 			</div>
 
@@ -1814,6 +1857,39 @@
 							<option value="const char*" disabled>String (set of characters and digits)</option>
 							<option value="bool" disabled>Boolean (True or False)</option>
 						</select></div>
+					</td>
+				</tr></tbody>
+			</table>
+
+			<!-- Add this to the templates section -->
+			<table id="adc-row">
+				<tbody><tr>
+					<td>
+						<i class="ui remove-row red icon close"></i> <i class="ui move-row blue icon sort"></i>
+					</td>
+					<td>
+						<div class="field">
+							<select class="ui fluid dropdown adc-type" name="Atlas_Entities.Entity_*.Services.Service_*.ADC.ADC_*.Type">
+								<option value="" disabled selected>Select ADC type</option>
+								<option value="MCP3008">MCP3008</option>
+								<option value="ADS1115">ADS1115</option>
+							</select>
+						</div>
+					</td>
+					<td>
+						<div class="field">
+							<input type="number" 
+								   name="Atlas_Entities.Entity_*.Services.Service_*.ADC.ADC_*.Channel"
+								   placeholder="Enter channel number"
+								   step="1">
+						</div>
+					</td>
+					<td>
+						<div class="field">
+							<input type="text" 
+								   name="Atlas_Entities.Entity_*.Services.Service_*.ADC.ADC_*.ADC_Output" 
+								   placeholder="Enter variable name">
+						</div>
 					</td>
 				</tr></tbody>
 			</table>
