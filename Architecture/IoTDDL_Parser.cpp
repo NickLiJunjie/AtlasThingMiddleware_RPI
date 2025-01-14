@@ -73,6 +73,42 @@ string IoTDDL_Parser::parseXMLTag(string firstTag, string secondTag, string thir
 	}
 }
 
+//get data of tag with 7th level
+string IoTDDL_Parser::parseXMLTag(string firstTag, string secondTag, string thirdTag, string fourthTag, string fifthTag, string sixthTag, string seventhTag){
+	if(!fileExist) return "";
+	try{
+		const char * a = firstTag.c_str();	
+		const char * b = secondTag.c_str();
+		const char * c = thirdTag.c_str();
+		const char * d = fourthTag.c_str();
+		const char * e = fifthTag.c_str();
+		const char * f = sixthTag.c_str();
+		const char * g = seventhTag.c_str();
+		return doc.FirstChildElement(a)->FirstChildElement(b)->FirstChildElement(c)->FirstChildElement(d)->FirstChildElement(e)->FirstChildElement(f)->FirstChildElement(g)->GetText();
+	}catch( ... ){
+	  return "";
+	}
+}
+
+//get data of tag with 8th level
+string IoTDDL_Parser::parseXMLTag(string firstTag, string secondTag, string thirdTag, string fourthTag, string fifthTag, string sixthTag, string seventhTag, string eighthTag){
+	if(!fileExist) return "";
+	try{
+		const char * a = firstTag.c_str();	
+		const char * b = secondTag.c_str();
+		const char * c = thirdTag.c_str();
+		const char * d = fourthTag.c_str();
+		const char * e = fifthTag.c_str();
+		const char * f = sixthTag.c_str();
+		const char * g = seventhTag.c_str();
+		const char * h = eighthTag.c_str();
+		return doc.FirstChildElement(a)->FirstChildElement(b)->FirstChildElement(c)->FirstChildElement(d)->FirstChildElement(e)->FirstChildElement(f)->FirstChildElement(g)->FirstChildElement(h)->GetText();
+	}catch( ... ){
+	  return "";
+	}
+}	
+
+
 vector<string> IoTDDL_Parser::parseXMLTagArray(string firstTag, string secondTag, string thirdTag, string fourthTag, string fifthTag, string sixthTag) {
 	if (!fileExist) return {};
 	const char * a = firstTag.c_str();

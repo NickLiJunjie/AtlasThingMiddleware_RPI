@@ -39,9 +39,13 @@ class IoTDDL_Parser {
 	string parseXMLTag(string firstTag, string secondTag, string thirdTag, string fourthTag);
 	string parseXMLTag(string firstTag, string secondTag, string thirdTag, string fourthTag, string fifthTag);
 	string parseXMLTag(string firstTag, string secondTag, string thirdTag, string fourthTag, string fifthTag, string sixthTag);
+	string parseXMLTag(string firstTag, string secondTag, string thirdTag, string fourthTag, string fifthTag, string sixthTag, string seventhTag);
+	string parseXMLTag(string firstTag, string secondTag, string thirdTag, string fourthTag, string fifthTag, string sixthTag, string seventhTag, string eighthTag);
 
 	//get array of data of tag
 	vector<string> parseXMLTagArray(string firstTag, string secondTag, string thirdTag, string fourthTag, string fifthTag, string sixthTag);
+	vector<string> parseXMLTagArray(string firstTag, string secondTag, string thirdTag, string fourthTag, string fifthTag, string sixthTag, string seventhTag);
+	vector<string> parseXMLTagArray(string firstTag, string secondTag, string thirdTag, string fourthTag, string fifthTag, string sixthTag, string seventhTag, string eighthTag);
 
 	//retrive data of tag
     	string retriveXMLTag(string maintag, string tag);

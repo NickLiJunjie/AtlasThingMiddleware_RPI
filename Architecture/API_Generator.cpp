@@ -141,13 +141,21 @@ void API_Generator::Generate_ServicesBundles(){
 				Service_Libraries = DDLM.parseXMLTag("Atlas_IoTDDL","Atlas_Entities","Entity_"+std::to_string(j),"Services","Service_"+std::to_string(i),"Libraries");
 			}
 
+			// Parse ADC configuration
+            string Service_ADC_Number = DDLM.parseXMLTag("Atlas_IoTDDL","Atlas_Entities","Entity_"+std::to_string(j),"Services", 
+                                                        "Service_"+std::to_string(i),"ADC_Number");
+            int num_ADC = 0;
+            if (!Service_ADC_Number.empty()) {
+                num_ADC = atoi(Service_ADC_Number.c_str());
+            }
+			
 			//Output
 			string Service_OutputTypes       = DDLM.parseXMLTag("Atlas_IoTDDL","Atlas_Entities","Entity_"+std::to_string(j),"Services","Service_"+std::to_string(i),"OutputType");
 
 			//Code
 			string Service_Code   		= DDLM.parseXMLTag("Atlas_IoTDDL","Atlas_Entities","Entity_"+std::to_string(j),"Services","Service_"+std::to_string(i),"Service_Formula");
 		
-			cout<<"Generating service bundle for "<<Service_Name<<"under entity#"<<j<<endl;
+			cout<<"Generating service bundle for "<<Service_Name<<" under entity#"<<j<<endl;
 		
 			auto dir = "Architecture/GeneratedServices/service/" + Service_Name + "/";
 
@@ -172,6 +180,139 @@ void API_Generator::Generate_ServicesBundles(){
 					def << "library = \"" << "#include <" << lib << ">" << "\";" << std::endl;
 				}
 			}
+
+			if(Service_OutputTypes == "void") {
+				def << "output = { type = void; };" << std::endl;
+			} else {
+				string Service_OutputDescription       = DDLM.parseXMLTag("Atlas_IoTDDL","Atlas_Entities","Entity_"+std::to_string(j),"Services","Service_"+std::to_string(i),"OutputDescription");
+				//string Service_OutputRange       = DDLM.parseXMLTag("Atlas_IoTDDL","Atlas_Entity_"+std::to_string(num_Entities),"Resource_Service","Service_"+std::to_string(i),"OutputRange");
+				def << "output = { name = "<<Service_OutputDescription<<"; type = \""<<Service_OutputTypes<<"\"; };" << std::endl;
+			}
+
+			
+			// Handle ADC specific libraries and configurations
+			if(num_ADC > 0) {
+				// Add common variables for ADC configuration
+				def << "source = \"static bool adc_initialized = false;\\n\";" << std::endl;
+				
+				// Create a structure to store ADC configurations
+				struct ADCConfig {
+					string type;
+					string channel;
+					string output_var;
+				};
+				vector<ADCConfig> adc_configs;
+				
+				// First pass: Collect all ADC configurations
+				for(int adc=1; adc<=num_ADC; adc++) {
+					ADCConfig config;
+					config.type = DDLM.parseXMLTag("Atlas_IoTDDL","Atlas_Entities","Entity_"+std::to_string(j),"Services",
+						"Service_"+std::to_string(i),"ADC","ADC_"+std::to_string(adc),"Type");
+					config.channel = DDLM.parseXMLTag("Atlas_IoTDDL","Atlas_Entities","Entity_"+std::to_string(j),"Services",
+						"Service_"+std::to_string(i),"ADC","ADC_"+std::to_string(adc),"Channel");
+					config.output_var = DDLM.parseXMLTag("Atlas_IoTDDL","Atlas_Entities","Entity_"+std::to_string(j),"Services",
+						"Service_"+std::to_string(i),"ADC","ADC_"+std::to_string(adc),"ADC_Output");
+					adc_configs.push_back(config);
+				}
+				
+				// Track unique ADC types
+				std::set<string> adc_types;
+				for(const auto& config : adc_configs) {
+					if(adc_types.find(config.type) == adc_types.end()) {
+						if(config.type == "ADS1115") {
+							def << "library = \"" << "#include <wiringPiI2C.h>" << "\";" << std::endl;
+							
+							// Add ADS1115 constants
+							def << "source = \"#define ADS1115_ADDRESS     0x48\\n\";" << std::endl;
+							def << "source = \"#define ADS1115_REG_CONV   0x00\\n\";" << std::endl;
+							def << "source = \"#define ADS1115_REG_CONFIG 0x01\\n\";" << std::endl;
+							def << "source = \"#define ADS1115_OS_SINGLE      0x8000\\n\";" << std::endl;
+							def << "source = \"#define ADS1115_MUX_SINGLE_0   0x4000\\n\";" << std::endl;
+							def << "source = \"#define ADS1115_PGA_4_096V     0x0200\\n\";" << std::endl;
+							def << "source = \"#define ADS1115_MODE_SINGLE    0x0100\\n\";" << std::endl;
+							def << "source = \"#define ADS1115_DR_128SPS      0x0080\\n\";" << std::endl;
+							def << "source = \"#define ADS1115_COMP_QUE_DIS   0x0003\\n\";" << std::endl;
+							
+							// Add static file descriptor for ADS1115
+							def << "source = \"static int ads1115_fd = -1;\\n\";" << std::endl;
+							
+						} else if(config.type == "MCP3008") {
+							def << "library = \"" << "#include <wiringPiSPI.h>" << "\";" << std::endl;
+							
+							// Add MCP3008 constants
+							def << "source = \"#define SPI_CHANNEL 0\\n\";" << std::endl;
+							def << "source = \"#define SPI_SPEED 1350000\\n\";" << std::endl;
+						}
+						adc_types.insert(config.type);
+					}
+				}
+				
+				// Initialize devices
+				def << "source = \"if (!adc_initialized) {\\n\";" << std::endl;
+				def << "source = \"    if (wiringPiSetup() == -1) {\\n\";" << std::endl;
+				def << "source = \"        value = -1;\\n\";" << std::endl;
+				def << "source = \"        return (void*)&value;\\n\";" << std::endl;
+				def << "source = \"    }\\n\";" << std::endl;
+				
+				if(adc_types.find("ADS1115") != adc_types.end()) {
+					def << "source = \"    ads1115_fd = wiringPiI2CSetup(ADS1115_ADDRESS);\\n\";" << std::endl;
+					def << "source = \"    if (ads1115_fd == -1) {\\n\";" << std::endl;
+					def << "source = \"        value = -1;\\n\";" << std::endl;
+					def << "source = \"        return (void*)&value;\\n\";" << std::endl;
+					def << "source = \"    }\\n\";" << std::endl;
+				}
+				
+				if(adc_types.find("MCP3008") != adc_types.end()) {
+					def << "source = \"    if (wiringPiSPISetup(SPI_CHANNEL, SPI_SPEED) == -1) {\\n\";" << std::endl;
+					def << "source = \"        value = -1;\\n\";" << std::endl;
+					def << "source = \"        return (void*)&value;\\n\";" << std::endl;
+					def << "source = \"    }\\n\";" << std::endl;
+				}
+				
+				def << "source = \"    adc_initialized = true;\\n\";" << std::endl;
+				def << "source = \"}\\n\";" << std::endl;
+				
+				// Process each ADC configuration
+				for(const auto& config : adc_configs) {
+					// Declare output variable
+					def << "source = \"int " << config.output_var << " = 0;\\n\";" << std::endl;
+					
+					if(config.type == "ADS1115") {
+						// Create a unique configuration variable for this ADC
+						string config_var = "adc_config_" + config.output_var;
+						
+						def << "source = \"uint16_t " << config_var << " = ADS1115_OS_SINGLE |\\n\";" << std::endl;
+						def << "source = \"    (0x4000 | (" << config.channel << " << 12)) |\\n\";" << std::endl;
+						def << "source = \"    ADS1115_PGA_4_096V |\\n\";" << std::endl;
+						def << "source = \"    ADS1115_MODE_SINGLE |\\n\";" << std::endl;
+						def << "source = \"    ADS1115_DR_128SPS |\\n\";" << std::endl;
+						def << "source = \"    ADS1115_COMP_QUE_DIS;\\n\";" << std::endl;
+						
+						// Write configuration and read value
+						def << "source = \"wiringPiI2CWriteReg16(ads1115_fd, ADS1115_REG_CONFIG, "
+							<< "(" << config_var << " >> 8) | ((" << config_var << " & 0xff) << 8));\\n\";" << std::endl;
+						def << "source = \"delay(8);\\n\";" << std::endl;
+						
+						string raw_var = "raw_" + config.output_var;
+						def << "source = \"int16_t " << raw_var 
+							<< " = wiringPiI2CReadReg16(ads1115_fd, ADS1115_REG_CONV);\\n\";" << std::endl;
+						def << "source = \"" << config.output_var 
+							<< " = ((" << raw_var << " >> 8) & 0xff) | ((" << raw_var << " & 0xff) << 8);\\n\";" << std::endl;
+						
+					} else if(config.type == "MCP3008") {
+						string buffer_var = "buffer_" + config.output_var;
+						// Create and initialize buffer for this ADC
+						def << "source = \"unsigned char " << buffer_var << "[3] = "
+							<< "{1, (8 + " << config.channel << ") << 4, 0};\\n\";" << std::endl;
+						
+						// Read value
+						def << "source = \"wiringPiSPIDataRW(SPI_CHANNEL, " << buffer_var << ", 3);\\n\";" << std::endl;
+						def << "source = \"" << config.output_var 
+							<< " = ((" << buffer_var << "[1] & 3) << 8) + " << buffer_var << "[2];\\n\";" << std::endl;
+					}
+				}
+			}
+
 			
 			def << "name = " << Service_Name << ";" << std::endl;           // Add the service name
 
@@ -421,30 +562,9 @@ void API_Generator::Generate_ServicesBundles(){
 
 			
 
-			if(Service_OutputTypes == "void") {
-				def << "output = { type = void; };" << std::endl;
-			} else {
-				string Service_OutputDescription       = DDLM.parseXMLTag("Atlas_IoTDDL","Atlas_Entities","Entity_"+std::to_string(j),"Services","Service_"+std::to_string(i),"OutputDescription");
-				//string Service_OutputRange       = DDLM.parseXMLTag("Atlas_IoTDDL","Atlas_Entity_"+std::to_string(num_Entities),"Resource_Service","Service_"+std::to_string(i),"OutputRange");
-				def << "output = { name = "<<Service_OutputDescription<<"; type = \""<<Service_OutputTypes<<"\"; };" << std::endl;
-			}
+			
 			def.close();
 
-	    	// // 在这里添加复制逻辑
-	    	// std::string targetPath = "/home/lijunjie/Desktop/service.def"; // 替换成你想要的目标路径
-	    	// std::ifstream src(dir + "service.def", std::ios::binary);
-	    	// std::ofstream dst(targetPath, std::ios::binary);
-
-	    	if (src && dst) {
-	    		dst << src.rdbuf();
-	    		src.close();
-	    		dst.close();
-	    	} else {
-	    		std::cerr << "Failed to copy service.def to target path" << std::endl;
-	    	}
-
-			// This system call instructs the Makefile under '.../Architecture/GeneratedServices/service/Makefile'
-			// to generate the directory of the service
 			system(("make -CArchitecture/GeneratedServices/service " + Service_Name).c_str());
 			cout<<"Done Parsing and generating Service #"<<Service_Number<<endl;
 	    }

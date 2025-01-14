@@ -7,9 +7,9 @@
 #include <csignal>
 #include <cppmicroservices/BundleActivator.h>
 extern "C" {
-[+ IF (exist? "library") +]
+[+ FOR library +]
 [+ (get "library") +]
-[+ ENDIF +]
+[+ ENDFOR +]
 }
 
 #include <service/Service.cpp>
