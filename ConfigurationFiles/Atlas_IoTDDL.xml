@@ -3,12 +3,12 @@
 		<Descriptive_Metadata>
 			<Thing_ATID>RPi-LJJ</Thing_ATID>
 			<Thing_Name>RPi-LJJ</Thing_Name>
-			<Thing_Owner>Junjie Li</Thing_Owner>
-			<Thing_Vendor>RaspberryPiCo</Thing_Vendor>
-			<Thing_Model>4B</Thing_Model>
-			<Thing_ReleaseDate>6/2019</Thing_ReleaseDate>
-			<Thing_Type>Thing of Things</Thing_Type>
-			<Thing_OperatingSystem>Raspbian</Thing_OperatingSystem>
+			<Thing_Owner></Thing_Owner>
+			<Thing_Vendor></Thing_Vendor>
+			<Thing_Model></Thing_Model>
+			<Thing_ReleaseDate>8/2020</Thing_ReleaseDate>
+			<Thing_Type></Thing_Type>
+			<Thing_OperatingSystem></Thing_OperatingSystem>
 			<Thing_ShortDescription></Thing_ShortDescription>
 			<LongDescription></LongDescription>
 			<Thing_SSID>DiveNet</Thing_SSID>
@@ -35,14 +35,14 @@
 		<Administrative_Metadata>
 			<Network_Manager>
 				<Module>WiFi</Module>
-				<Type>Attached</Type>
+				<Type></Type>
 				<Network_Name>0x150</Network_Name>
 				<Network_Passcode>336336336</Network_Passcode>
 				<MulticastGroup>
 					<IP>232.1.1.1</IP>
 					<Port>1235</Port>
 				</MulticastGroup>
-				<Communication_Protocol>Sockets</Communication_Protocol>
+				<Communication_Protocol></Communication_Protocol>
 				<InterOperableCommunication>
 					<Broker>
 						<Vendor>HiveMQ</Vendor>
@@ -76,7 +76,7 @@
 
 		</Thing_Attachment>
 		<Structural_Metadata>
-			<Number_Hardware>1</Number_Hardware>
+			<Number_Hardware>0</Number_Hardware>
 			<Number_Software>0</Number_Software>
 			<Number_Hybrid>0</Number_Hybrid>
 			<Number_Entities>1</Number_Entities>
@@ -85,25 +85,25 @@
 	<Atlas_Entities>
 		<Entity_1>
 			<Descriptive_Metadata>
-				<ID>AUTO_DOOR</ID>
-				<Name>AUTODOOR</Name>
+				<ID>AnalogReader</ID>
+				<Name></Name>
 				<Owner></Owner>
 				<Vendor></Vendor>
-				<Category>Hardware</Category>
-				<Type>Connected</Type>
+				<Category></Category>
+				<Type></Type>
 				<Description></Description>
 			</Descriptive_Metadata>
 			<Services>
 				<Service_1>
-					<Name>MOTION_DETECTION</Name>
-					<AppCategory>Ambiance</AppCategory>
-					<Type>Report</Type>
+					<Name>ADCTest</Name>
+					<AppCategory></AppCategory>
+					<Type></Type>
 					<Keywords></Keywords>
 					<Description></Description>
 					<Contextual_Constraints>
-						<Time_Window>10seconds</Time_Window>
-						<Usage_Mode>Single</Usage_Mode>
-						<Concurrent>No</Concurrent>
+						<Time_Window>30seconds</Time_Window>
+						<Usage_Mode></Usage_Mode>
+						<Concurrent></Concurrent>
 					</Contextual_Constraints>
 					<Temporal_Constraints>
 						<Working>
@@ -121,83 +121,7 @@
 // ~ Service body C/C++ code block ~
 // You can use the inputs you defined above by name
 // Any return values should match the specified output type
-int pinID = 12;
-int duration = 5;
-
-gpioInitialise();
-gpioSetMode(pinID, PI_INPUT);
-
-struct timespec ts;
-clock_t start, end;
-clock_gettime(CLOCK_MONOTONIC, &ts);
-start = ts.tv_sec;
-
-while (true) {
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    end = ts.tv_sec;
-    if (gpioRead(pinID) == PI_HIGH) {
-        value = 1;
-        break;
-    }
-    if ((end - start) >= duration) {
-        value = 0;
-        break;
-    }
-}
-gpioTerminate();
-
-]]></Service_Formula>
-					<Service_NumberInputs>0</Service_NumberInputs>
-					<Service_InputTypes></Service_InputTypes>
-					<Service_InputDescriptions></Service_InputDescriptions>
-					<Library_Number>2</Library_Number>
-					<Libraries>pigpio.h,time.h</Libraries>
-				</Service_1>
-				<Service_2>
-					<Name>SERVO_MOTOR</Name>
-					<AppCategory>Automation</AppCategory>
-					<Type>Action</Type>
-					<Keywords></Keywords>
-					<Description></Description>
-					<Contextual_Constraints>
-						<Time_Window>10seconds</Time_Window>
-						<Usage_Mode>Single</Usage_Mode>
-						<Concurrent>No</Concurrent>
-					</Contextual_Constraints>
-					<Temporal_Constraints>
-						<Working>
-							<StartTime>6am</StartTime>
-							<EndTime>10pm</EndTime>
-						</Working>
-						<Callable>
-							<StartTime>6:30am</StartTime>
-							<EndTime>9:30pm</EndTime>
-						</Callable>
-					</Temporal_Constraints>
-					<OutputDescription></OutputDescription>
-					<OutputType>void</OutputType>
-					<Service_Formula><![CDATA[
-// ~ Service body C/C++ code block ~
-// You can use the inputs you defined above by name
-// Any return values should match the specified output type
-int pinID = 18;
-wiringPiSetupGpio();
-pinMode(pinID,PWM_OUTPUT);
-pwmSetMode(PWM_MODE_MS);
-pwmSetRange(2000);
-pwmSetClock(192);
-     
-
-for(int i=0;i<180;i = i + 20){
-		pwmWrite(pinID,i);
-		delay(1000);
-}
-
-for(int i=180;i>0;i = i - 20){
-		pwmWrite(pinID,i);
-		delay(1000);
-}
-
+value = mcpRead0;
 
 ]]></Service_Formula>
 					<Service_NumberInputs>0</Service_NumberInputs>
@@ -205,23 +129,23 @@ for(int i=180;i>0;i = i - 20){
 					<Service_InputDescriptions></Service_InputDescriptions>
 					<Library_Number>1</Library_Number>
 					<Libraries>wiringPi.h</Libraries>
-				</Service_2>
-				<Number_Services>2</Number_Services>
+					<ADC_Number>1</ADC_Number>
+					<ADC>
+						<ADC_1>
+							<Type>MCP3008</Type>
+							<Channel>0</Channel>
+							<ADC_Output>mcpRead0</ADC_Output>
+						</ADC_1>
+					</ADC>
+				</Service_1>
+				<Number_Services>1</Number_Services>
 			</Services>
-			<Relationships>
-				<Relationship_1>
-					<Name>AUTO_DOOR</Name>
-					<Establisher>Junjie Li</Establisher>
-					<Description>use motion sensor to trig servo motor</Description>
-					<type>control</type>
-					<Input1>MOTION_DETECTION</Input1>
-					<Input2>SERVO_MOTOR</Input2>
-				</Relationship_1>
-				<Number_Relationships>1</Number_Relationships>
-			</Relationships>
 			<UnboundedService>
 				<Number_UnboundedServices>0</Number_UnboundedServices>
 			</UnboundedService>
+			<Relationships>
+				<Number_Relationships>0</Number_Relationships>
+			</Relationships>
 		</Entity_1>
 	</Atlas_Entities>
 </Atlas_IoTDDL>
