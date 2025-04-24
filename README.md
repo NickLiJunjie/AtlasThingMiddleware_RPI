@@ -28,10 +28,6 @@ holds the entry point to compile Atlas-IoT_Thing  (readme file, cMServices shell
 ### ConfigurationFiles/ : holds the different configuration files (e.g., Atlas IoTDDL) 
 Use the [Atlas IoT-DDL Builder](https://www.cise.ufl.edu/~helal/Atlas-IoT-DDL-Builder.html)  to build an IoT-DDL file for your Atlas thing.
 
-<br/>
-<br/>
-<br/>
-
 
 ## Prepare your Atlas smart thing on RaspberryPi through the following steps:
 
