@@ -126,10 +126,6 @@ cd WiringPi
 ```
 
 ```
-sudo apt install rpi.gpio
-```
-
-```
 sudo raspi-config
 ```
 
