@@ -34,36 +34,30 @@ Use the [Atlas IoT-DDL Builder](https://www.cise.ufl.edu/~helal/Atlas-IoT-DDL-Bu
 ### Step1: run the following linux commands through terminal:
 
 ```
-sudo apt-get update
+sudo apt update
+sudo apt upgrade
 ```
 
 ```
-sudo apt-get upgrade
+sudo apt install -y \
+build-essential \
+libcurl4-openssl-dev \
+libboost-all-dev \
+  gcc gcc-12 \
+  g++ g++-12 \
+  cmake cmake-data \
+  cmake-curses-gui\
+  doxygen \
+  autogen\
+  make \
+  libc6-dev \
+  libgcc-12-dev \
+  libstdc++-12-dev \
+  libstdc++6 \
+  git dpkg apt
 ```
 
-```
-sudo apt-get install build-essential
-```
 
-```
-sudo apt-get install doxygen
-```
-
-```
-sudo apt-get install cmake cmake-curses-gui
-```
-
-```
-sudo apt-get install libboost-all-dev
-```
-
-```
-sudo apt-get install curl libcurl4-openssl-dev
-```
-
-```
-sudo apt-get install autogen
-```
 
 ### Step2: Get the latest version of the middleware:
 From Github, download the zip version of the middleware on your RaspberryPi, then unzip the folder.
